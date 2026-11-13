@@ -1,0 +1,76 @@
+#!/bin/sh
+# vtyshの設定に「interface eth1.10」のようなVLANサブインターフェースが現れたら、
+# カーネルにVLANデバイス（eth1のVLAN10）を作る。FRRはVLANデバイスを自分で作れないが、
+# 存在しないインターフェースにも設定は入れられ、デバイスができた時点でアドレス等を適用する
+# （2026-10-14確認）。これで学生はCiscoと同じ感覚で
+#   int eth1.10
+#    ip add 10.10.0.1/24
+# と打つだけでサブインターフェースを使える（write memoryすれば再起動後も同じように作られる）。
+#
+# 設定から消えたサブインターフェース（no ip address 等で設定が空になり、running-configに
+# 出なくなったもの）はデバイスも削除する。VLAN IDは名前の「.」の後ろ（1〜4094）。
+#
+# あわせて、vtyshのhostnameをLLDP/CDPで名乗る名前に反映する（2026-10-14〜、lldpd）
+lldp_name=
+# lldpdが送らなくなっていないか30秒ごとに確かめ、75秒送っていなければ起動し直す（スイッチのエージェントと同じ。
+# ラボの起動直後にlldpdが止まることがあった。2026-10-15）
+last_tx=
+tx_since=$(date +%s)
+last_check=0
+while :; do
+  now=$(date +%s)
+  if [ $((now - last_check)) -ge 30 ]; then
+    last_check=$now
+    if grep -qx 1 /sys/class/net/eth[1-9]*/carrier 2>/dev/null; then
+      tx=$(timeout 5 lldpcli -f keyvalue show statistics summary 2>/dev/null | sed -n 's/^lldp\.summary\.tx\.tx=//p')
+      if [ -n "$tx" ] && [ "$tx" != "$last_tx" ]; then
+        last_tx=$tx; tx_since=$now
+      elif [ $((now - tx_since)) -gt 75 ]; then
+        pkill lldpd
+        sleep 2
+        pkill -9 lldpd  # 固まっていてTERMで消えない時のため（止まったままだと新しいlldpdが起動できない）
+        sleep 1
+        /usr/local/bin/fnl-lldpd-start &
+        lldp_name=; last_tx=; tx_since=$now
+      fi
+    else
+      last_tx=; tx_since=$now
+    fi
+  fi
+  if conf=$(vtysh -c "show running-config" 2>/dev/null); then
+    # FRRではvtyshのhostnameはそのセッションの中でしか効かず、write memoryするとfrr.confに残る。
+    # そのためfrr.confのhostnameを優先し、無ければデーモンのrunning-configの値を使う
+    host=$(sed -n 's/^hostname \(.*\)$/\1/p;T;q' /etc/frr/frr.conf 2>/dev/null)
+    if [ -z "$host" ]; then
+      host=$(printf '%s\n' "$conf" | sed -n 's/^hostname \(.*\)$/\1/p;T;q')
+      [ -n "$host" ] || host=$(hostname)
+    fi
+    if [ "$host" != "$lldp_name" ] && lldpcli configure system hostname "$host" >/dev/null 2>&1; then
+      lldpcli configure lldp portidsubtype ifname >/dev/null 2>&1
+      lldpcli configure system capabilities enabled router >/dev/null 2>&1
+      lldpcli configure system ip management pattern '!eth0,eth*' >/dev/null 2>&1
+      lldp_name=$host
+    fi
+    want=$(printf '%s\n' "$conf" | sed -n 's/^interface \(eth[0-9][0-9]*\.[0-9][0-9]*\)$/\1/p')
+    for name in $want; do
+      parent=${name%.*}
+      vid=${name#*.}
+      [ "$vid" -ge 1 ] 2>/dev/null && [ "$vid" -le 4094 ] || continue
+      [ -e "/sys/class/net/$parent" ] || continue
+      if [ ! -e "/sys/class/net/$name" ]; then
+        ip link add link "$parent" name "$name" type vlan id "$vid" && ip link set "$name" up
+      fi
+    done
+    for d in /sys/class/net/eth*.*; do
+      [ -e "$d" ] || continue
+      n=${d##*/}
+      case " $(echo $want) " in
+        *" $n "*) ;;
+        *) ip link del "$n" ;;
+      esac
+    done
+  fi
+  # 確認は2秒ごと（サブインターフェースができるまで最大2秒）。毎秒だとvtyshの起動だけでルーター1台あたり
+  # CPUを約2.5%使っていた（2026-10-15計測。FRRのデーモン側の負荷はほぼ0）
+  sleep 2
+done

@@ -1,0 +1,63 @@
+.brand {
+  display: flex;
+  align-items: center;
+}
+
+.brand--clickable {
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.brand--clickable:hover {
+  opacity: 0.85;
+}
+
+.brand--clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.brand__wordmark {
+  display: block;
+  height: auto;
+}
+
+/* デフォルト（ライトテーマ）はlightを表示、darkは隠す */
+.brand__wordmark--dark {
+  display: none;
+}
+
+/* ダークテーマの時だけ入れ替える */
+:root[data-theme='dark'] .brand__wordmark--light {
+  display: none;
+}
+:root[data-theme='dark'] .brand__wordmark--dark {
+  display: block;
+}
+
+.brand--nav .brand__wordmark {
+  width: 150px; /* 記号を外した文字だけの画像（約4:1）。高さはこれまでと同じくらい */
+}
+
+.brand--login {
+  align-self: center;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px; /* 下の入力欄との間（見出し・説明を消したので、少し空ける） */
+  /* 記号の線の色は文字色に従う（ライト/ダークで切り替わる） */
+  color: var(--ink);
+}
+
+.brand__mark {
+  flex: none;
+}
+
+.brand--login .brand__wordmark {
+  width: 240px;
+}
+
+@media (max-width: 640px) {
+  .brand--nav .brand__wordmark {
+    width: 120px;
+  }
+}

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="76" height="64" viewBox="0 0 76 64">
+  <style>
+    path { fill: none; stroke: #2d3a47; stroke-width: 6.5; stroke-linecap: round; stroke-linejoin: round; }
+    @media (prefers-color-scheme: dark) { path { stroke: #d5deea; } }
+  </style>
+  <path d="M12 58V8h22M12 29h22"/>
+  <path d="M34 29V58"/>
+  <path d="M34 29 48 58"/>
+  <path d="M48 29V58h20"/>
+  <circle cx="34" cy="29" r="5.4" fill="#f28c4b"/>
+</svg>

@@ -1,0 +1,311 @@
+.topology-editor {
+  width: 100%;
+  height: 100%;
+  display: flex;
+}
+
+.topology-editor__main {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.topology-editor__toolbar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap; /* 幅が足りない時は折り返す（長い警告文が細い縦書きのようにつぶれていた、2026-10-19） */
+  align-items: center;
+  gap: 8px 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.topology-editor__toolbar-spacer {
+  flex: 1;
+}
+
+.topology-editor__lab-name {
+  font-size: 14px;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 180px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.topology-editor__status {
+  font-size: 12px;
+}
+
+.topology-editor__status--ok {
+  color: var(--status-running);
+}
+
+.topology-editor__status--error {
+  color: var(--warn);
+}
+
+.topology-editor__context-menu-status {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  background: var(--panel-bg, var(--surface));
+  padding: 6px 10px;
+  border-radius: 4px;
+  box-shadow: var(--shadow-sm);
+  z-index: 50;
+}
+
+.topology-editor__canvas {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+.topology-editor__context-menu {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+
+.topology-editor__context-menu button {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  justify-content: flex-start;
+  text-align: left;
+  cursor: pointer;
+}
+
+.topology-editor__context-menu button:hover {
+  background: var(--surface-2);
+}
+
+.topology-editor__modal-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--overlay);
+}
+
+.topology-editor__modal {
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+}
+
+.topology-editor__modal h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.topology-editor__modal-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.topology-editor__modal-row label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.topology-editor__modal-row select {
+  font-size: 13px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.topology-editor__modal-warn {
+  font-size: 11px;
+  color: var(--warn);
+}
+
+.topology-editor__modal-vlan {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+  padding: 6px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+
+.topology-editor__modal-vlan select,
+.topology-editor__modal-vlan input {
+  font-size: 12.5px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* router on a stick：VLANサブインターフェース1行分（VLAN ID / 削除ボタン） */
+.topology-editor__modal-subif-row {
+  display: flex;
+  gap: 4px;
+}
+
+.topology-editor__modal-subif-row input:first-child {
+  width: 64px;
+}
+
+.topology-editor__modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* 元に戻す／やり直すで何が変わったかの表示（2026-10-14） */
+.topology-editor__history-notice {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  max-width: min(560px, calc(100% - 32px));
+  padding: 8px 14px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+  cursor: pointer;
+  animation: topology-editor-notice-in 0.15s ease-out;
+}
+
+.topology-editor__history-notice-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.topology-editor__history-notice ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+@keyframes topology-editor-notice-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+}
+
+/* React Flowのミニマップ・ズーム操作・帰属表示を、アプリの色（ライト／ダーク）に合わせる（2026-10-19。
+   以前はダークでも白いままだった） */
+.react-flow {
+  --xy-minimap-background-color-default: var(--surface);
+  --xy-minimap-mask-background-color-default: color-mix(in srgb, var(--bg) 70%, transparent);
+  --xy-minimap-node-background-color-default: var(--ink-faint);
+  --xy-controls-button-background-color-default: var(--surface);
+  --xy-controls-button-background-color-hover-default: var(--surface-2);
+  --xy-controls-button-color-default: var(--ink);
+  --xy-controls-button-border-color-default: var(--border);
+  --xy-attribution-background-color-default: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+
+.react-flow__minimap {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* ---- レスポンシブ（2026-10-19）---- */
+.topology-editor__toolbar {
+  position: relative;
+}
+
+@media (max-width: 900px) {
+  /* パレットが上に来るので、エディタ全体を縦に並べる */
+  .topology-editor {
+    flex-direction: column;
+  }
+
+  /* ツールバーは折り返す（ボタンが多いので1行に収めない） */
+  .topology-editor__toolbar-spacer {
+    display: none;
+  }
+
+  .topology-editor__lab-name {
+    flex: 1 1 140px;
+    width: auto;
+    min-width: 120px;
+  }
+}
+
+@media (max-width: 640px) {
+  .topology-editor__toolbar {
+    padding: 6px 8px;
+  }
+
+  /* ミニマップは画面を覆うので、スマホでは出さない */
+  .react-flow__minimap {
+    display: none;
+  }
+
+  /* ダイアログは画面の中に収め、縦にはみ出したらダイアログの中でスクロールする */
+  .topology-editor__modal,
+  .topology-editor__modal.snapshot-dialog,
+  .topology-editor__modal.link-condition {
+    /* .snapshot-dialog等は幅・高さを画面基準(100vw/100vh)で決めていて詳細度も高いので、ここで同じ詳細度で上書きする */
+    max-width: calc(100% - 24px);
+    max-height: calc(100% - 24px);
+    overflow-y: auto;
+  }
+
+  .topology-editor__history-notice {
+    max-width: calc(100% - 16px);
+  }
+}
+
+/* スマホでダイアログの中身が長くて中でスクロールする時も、ボタン（閉じる等）が見えるようにする */
+@media (max-width: 640px) {
+  .topology-editor__modal-actions {
+    position: sticky;
+    bottom: -16px;
+    margin: 0 0 -16px;
+    padding: 10px 0 16px;
+    background: var(--surface);
+  }
+}
+
+/* メニューはoverflow: hiddenなので、フォーカス枠を内側に描く（外側だと左右が欠ける） */
+.topology-editor__context-menu button:focus-visible {
+  outline-offset: -2px;
+}

@@ -1,0 +1,67 @@
+import { PALETTE_NODE_CONFIGS, type PaletteNodeKind } from '../types/lab'
+import { Icon, type IconName } from './Icon'
+import './NodePalette.css'
+
+export const DND_MIME_TYPE = 'application/reactflow-node-kind'
+
+// ラベル（注釈）・エリア（図形）はデバイスノードではないので PaletteNodeKind には含めず、
+// 同じDND_MIME_TYPEチャンネルに特別な値として流す（TopologyEditor.tsx の onDrop で分岐）
+export const LABEL_DND_VALUE = 'label'
+export const AREA_DND_VALUE = 'area'
+
+const paletteOrder: PaletteNodeKind[] = ['router', 'l2-switch', 'l3-switch', 'pc']
+
+// パレットの各項目の記号（絵文字をやめて、ほかのアイコンと同じ線の太さ・色の規則にそろえた）
+const PALETTE_ICON: Record<PaletteNodeKind, IconName> = {
+  router: 'router',
+  'l2-switch': 'switch',
+  'l3-switch': 'l3switch',
+  pc: 'pc',
+}
+
+export default function NodePalette() {
+  const onDragStart = (event: React.DragEvent, kind: PaletteNodeKind | typeof LABEL_DND_VALUE | typeof AREA_DND_VALUE) => {
+    event.dataTransfer.setData(DND_MIME_TYPE, kind)
+    event.dataTransfer.effectAllowed = 'move'
+  }
+
+  return (
+    <aside className="node-palette">
+      <h2 className="node-palette__title">ノード</h2>
+      <p className="node-palette__hint">ドラッグしてキャンバスに配置</p>
+      {paletteOrder.map((kind) => {
+        const config = PALETTE_NODE_CONFIGS[kind]
+        return (
+          <div
+            key={kind}
+            className={`node-palette__item node-palette__item--${kind}`}
+            draggable
+            onDragStart={(event) => onDragStart(event, kind)}
+          >
+            <Icon name={PALETTE_ICON[kind]} />
+            {config.label}
+          </div>
+        )
+      })}
+      <div className="node-palette__divider" />
+      <div
+        className="node-palette__item node-palette__item--label"
+        draggable
+        onDragStart={(event) => onDragStart(event, LABEL_DND_VALUE)}
+        title="IPアドレスなどのメモをトポロジ上に自由に配置できます"
+      >
+        <Icon name="label" />
+        ラベル
+      </div>
+      <div
+        className="node-palette__item node-palette__item--area"
+        draggable
+        onDragStart={(event) => onDragStart(event, AREA_DND_VALUE)}
+        title="ノードをまとめて囲む枠を配置できます（見た目だけのグループ化）"
+      >
+        <Icon name="area" />
+        エリア
+      </div>
+    </aside>
+  )
+}

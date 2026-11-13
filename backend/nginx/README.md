@@ -1,0 +1,46 @@
+# nginx（入口・単一オリジン化）
+
+ブラウザからの入口を nginx 1つ（443/HTTPS）にまとめ、フロントの静的ファイル配信と
+各サービスへのリバースプロキシを担う。決定の経緯は `設計メモ（非公開）`（2026-10-10）、
+比較は `設計メモ（非公開）` C-1。
+
+| パス | 中継先 |
+| --- | --- |
+| `/login`, `/api/` | clab-api-server (127.0.0.1:8090, HTTPS自己署名) |
+| `/console` | console-proxy (8082, WebSocket) |
+| `/ovs/` | ovs-helper (8083、先頭の`/ovs`を除去) |
+| `/capture/` | capture-proxy (8084, HTTPS自己署名) |
+| `/` | `/var/www/free-networking-labs`（`vite build`の出力、SPA） |
+
+同一オリジンになるので **CORS設定は不要**（上流へ渡す`Origin`は空にしている）、
+証明書の警告も `https://fnl.example.com/` の1回で済む。
+
+## 初回セットアップ
+
+```sh
+# 1. 自己署名証明書（certs/はgitignore対象）
+mkdir -p certs
+openssl req -x509 -newkey rsa:2048 -keyout certs/key.pem -out certs/cert.pem -days 825 -nodes \
+  -subj "/CN=fnl.example.com" \
+  -addext "subjectAltName=DNS:fnl.example.com,DNS:fnl,DNS:localhost,IP:192.0.2.10,IP:127.0.0.1"
+
+# 2. フロントを本番ビルド（frontend/.env.production が相対パスの接続先を指定している）
+(cd ../../frontend && npm run build)
+
+# 3. nginx導入・設定・起動（要sudo、冪等）
+bash install.sh
+```
+
+## フロントを更新したとき（sudo不要）
+
+```sh
+bash deploy-frontend.sh
+```
+
+## 注意
+
+- nginxのバックエンド（8082/8083/8084/8090）は、今まで通りホスト上で動かしておくこと。
+  8082/8083/8084は2026-10-15から127.0.0.1だけで待ち受ける（`LISTEN_HOST`）。8090（clab-api-server）は
+  待ち受け先を選べないので、ファイアウォール（ufw）で22/80/443以外を閉じる（`設計メモ（非公開）`）。
+- `/login`は同じIPから1分に30回まで（まとめて40回まで）。超えると429（総当たり対策、2026-10-15）。
+- 開発時は従来どおり `vite dev`（5173、`frontend/.env`）で作業できる。

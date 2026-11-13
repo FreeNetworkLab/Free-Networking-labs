@@ -1,0 +1,175 @@
+/* ボタンの共通スタイル（種類：通常・主要・危険・ゴースト・アイコン。状態：hover・押下中・focus・disabled）。
+   色はすべてtheme.cssのトークン経由なので、ダークモードにもそのまま追従する。
+
+   使い方
+   - 何も付けない：通常（灰色の面）
+   - .btn-primary：主要（その画面でいちばん大事な操作。1画面に1〜2個まで）
+   - .btn-danger：危険（停止・削除・上書きなど、元に戻せない／影響が大きい操作）
+   - .btn-ghost：枠なし（戻る・補助的な操作）
+   - .btn-icon：正方形のアイコンボタン（↶ ↷ など。titleで意味を伝える）
+   個別のCSS（ホームのカード等）が上書きしたい時は大きさ・余白だけにして、色は--btn-*変数で変える。
+
+   基本の規則は:where()で詳細度0にしてあるので、個別のCSSの規則（コンソールのタブ、メニュー等）が
+   そのまま優先される。React Flowのコントロールのボタンには適用しない。 */
+
+:where(button:not([class*='react-flow'])) {
+  --btn-bg: var(--surface-2);
+  --btn-bg-hover: color-mix(in srgb, var(--ink) 9%, var(--surface-2));
+  --btn-bg-active: color-mix(in srgb, var(--ink) 16%, var(--surface-2));
+  --btn-fg: var(--ink);
+  --btn-border: var(--border);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 6px 16px;
+  border: 1px solid var(--btn-border);
+  border-radius: 6px;
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s,
+    color 0.12s;
+}
+
+/* hover・押下中は色の変数だけを差し替える（個別のCSSが背景を直接決めているボタンは影響を受けない） */
+:where(button:not([class*='react-flow'])):hover:not(:disabled) {
+  --btn-bg: var(--btn-bg-hover);
+}
+
+:where(button:not([class*='react-flow'])):active:not(:disabled) {
+  --btn-bg: var(--btn-bg-active);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  --btn-bg: var(--accent);
+  --btn-bg-hover: var(--accent-hover);
+  --btn-bg-active: var(--accent-active);
+  --btn-fg: var(--accent-ink);
+  --btn-border: transparent;
+  font-weight: 600;
+}
+
+/* 危険：ふだんは枠だけで目立たせすぎず、hoverで色を付ける */
+.btn-danger {
+  --btn-bg: transparent;
+  --btn-bg-hover: var(--danger-soft);
+  --btn-bg-active: color-mix(in srgb, var(--danger) 24%, transparent);
+  --btn-fg: var(--danger);
+  --btn-border: var(--danger);
+}
+
+.btn-ghost {
+  --btn-bg: transparent;
+  --btn-bg-hover: var(--surface-2);
+  --btn-bg-active: var(--border);
+  --btn-fg: var(--ink-soft);
+  --btn-border: transparent;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.btn-icon {
+  width: 40px;
+  aspect-ratio: 1; /* 基本の min-height（38px）より大きい 40px の正方形にする */
+  padding: 0;
+  font-size: 16px;
+}
+
+/* 文字を併記するアイコンボタン（タッチ画面・狭い画面でだけ文字を出す。下の @media 参照） */
+.btn-icon__label {
+  display: none;
+}
+
+/* アイコンボタンの中のアイコンは大きめに（押す場所だと分かりやすいように） */
+.btn-icon .icon,
+.app-nav__btn .icon {
+  width: 22px;
+  height: 22px;
+}
+
+/* 指で押す画面（スマホ・タブレット）では、ボタンを押しやすい大きさにする */
+@media (pointer: coarse) {
+  :where(button:not([class*='react-flow'])) {
+    min-height: 44px;
+  }
+
+  .btn-icon {
+    width: 44px;
+  }
+
+  /* タッチでは、マウスを載せても説明（title）が出ないので、アイコンの横に文字を出す */
+  .btn-icon--labeled {
+    width: auto;
+    aspect-ratio: auto;
+    padding: 0 12px;
+  }
+
+  .btn-icon--labeled .btn-icon__label {
+    display: inline;
+    font-size: 13px;
+  }
+}
+
+/* 狭い画面でも同じ（マウスのタブレット等でも、押す場所が分かるように） */
+@media (max-width: 900px) {
+  .btn-icon--labeled {
+    width: auto;
+    aspect-ratio: auto;
+    padding: 0 12px;
+  }
+
+  .btn-icon--labeled .btn-icon__label {
+    display: inline;
+    font-size: 13px;
+  }
+}
+
+/* アイコン（components/Icon.tsx）。ボタンの文字色に従う */
+.icon {
+  flex: none;
+  display: block;
+  width: 18px; /* 既定の大きさ。場所ごとの大きさは、このファイルや各CSSの規則で決める（Icon の size は、それを上書きしたい時だけ） */
+  height: 18px;
+}
+
+/* 開いている／入っている状態のボタン（コンソールパネルの表示など）：水色の枠と薄い水色の面 */
+.btn-icon[aria-pressed='true'] {
+  --btn-bg: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
+  --btn-bg-hover: color-mix(in srgb, var(--accent) 24%, var(--surface-2));
+  --btn-bg-active: color-mix(in srgb, var(--accent) 32%, var(--surface-2));
+  --btn-fg: var(--accent);
+  --btn-border: var(--accent);
+}
+
+/* 押されている状態のボタンも、hover・押下中で色が変わるようにする（上の規則が --btn-bg を固定しているため） */
+.btn-icon[aria-pressed='true']:hover:not(:disabled) {
+  --btn-bg: var(--btn-bg-hover);
+}
+
+.btn-icon[aria-pressed='true']:active:not(:disabled) {
+  --btn-bg: var(--btn-bg-active);
+}

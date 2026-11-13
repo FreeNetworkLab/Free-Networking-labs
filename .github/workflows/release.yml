@@ -40,12 +40,20 @@ jobs:
           context: backend/frr-router
           push: true
           tags: ${{ steps.meta.outputs.registry }}/fnl-frr:${{ steps.meta.outputs.frr }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=GPL-2.0-or-later AND GPL-2.0-only AND ISC AND MIT
+            org.opencontainers.image.description=Free-Networking-labs のノードのイメージ（ソースとライセンスは source のリポジトリを参照）
       - name: L2スイッチのイメージ
         uses: docker/build-push-action@v6
         with:
           context: backend/l2switch
           push: true
           tags: ${{ steps.meta.outputs.registry }}/fnl-l2switch:${{ steps.meta.outputs.l2 }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=GPL-2.0-or-later AND GPL-2.0-only AND ISC AND MIT
+            org.opencontainers.image.description=Free-Networking-labs のノードのイメージ（ソースとライセンスは source のリポジトリを参照）
       - name: L3スイッチのイメージ
         uses: docker/build-push-action@v6
         with:
@@ -54,6 +62,10 @@ jobs:
           build-args: BASE=${{ steps.meta.outputs.registry }}/fnl-l2switch:${{ steps.meta.outputs.l2 }}
           push: true
           tags: ${{ steps.meta.outputs.registry }}/fnl-l3switch:${{ steps.meta.outputs.l3 }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=GPL-2.0-or-later AND GPL-2.0-only AND ISC AND MIT
+            org.opencontainers.image.description=Free-Networking-labs のノードのイメージ（ソースとライセンスは source のリポジトリを参照）
       - name: 配布用の tar.gz を作る
         run: bash tools/make-dist.sh "${{ steps.meta.outputs.ver }}" "${{ steps.meta.outputs.registry }}" dist-out
       - name: Release に載せる

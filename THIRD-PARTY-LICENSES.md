@@ -43,5 +43,20 @@
 ## GPL のソフトを含むイメージについて
 
 `fnl/frr`・`fnl/l2switch`・`fnl/l3switch` のイメージは GPL のソフト（FRR、mstpd など）を含みます。
-イメージは配布せず、利用者が `backend/*/Dockerfile` から自分の環境でビルドします。
-Dockerfile とパッチはこのリポジトリにあるので、再現できます。
+**このイメージは、GitHub Container Registry（`ghcr.io/freenetworklab/fnl-frr`・`fnl-l2switch`・`fnl-l3switch`）で配布しています。**
+ソースからビルドすることもできます（`tools/install.sh --build-images`）。Dockerfile とパッチはこのリポジトリにあるので、再現できます。
+
+イメージに含まれる GPL のソフトと、そのソースの場所は次のとおりです（バージョンは、イメージの Dockerfile で固定したもの）。
+
+| ソフト | バージョン | ライセンス | ソース |
+|---|---|---|---|
+| FRRouting | 10.2.1（公式イメージ `quay.io/frrouting/frr:10.2.1`、改変なし） | GPL-2.0-or-later | https://github.com/FRRouting/frr （タグ `frr-10.2.1`） |
+| mstpd | コミット `2e747d80ad48ffd32ec2f918b48a7c7a3916253b` ＋ このリポジトリの `backend/l2switch/mstpd/fnl.patch` | GPL-2.0 | https://github.com/mstpd/mstpd と、改修パッチ（このリポジトリ） |
+| nftables・dhcp-helper・FRR（L3 スイッチ用）ほか Alpine のパッケージ | Alpine Linux 3.22 のもの | 各パッケージのライセンス | https://gitlab.alpinelinux.org/alpine/aports 、https://dl-cdn.alpinelinux.org/alpine/v3.22/ （各パッケージのソース） |
+
+- GPL-2.0 の全文は、各ソフトのソース（上の表）にあります。イメージにはラベル（`org.opencontainers.image.source`・`licenses`）でこのリポジトリと
+  ライセンスを示しています。ライセンス全文をイメージの中に入れることは、次のイメージの更新で行います。
+- このリポジトリの Dockerfile・スクリプト（`fnl-subif-agent`、`swcli` など）は MIT です。これらは FRR や mstpd と別のプロセスとして動かしており、
+  GPL のソフトを改変して組み込んだものではありません（mstpd だけは、上のパッチで改変しており、パッチは GPL-2.0 です）。
+- **ソースの提供について**：上のソフトの対応するソース（改変があればその差分を含む）は、上の場所から入手できます。
+  入手できない場合は、このリポジトリの Issue で請求してください。イメージを配布してから 3 年間、実費でソースを提供します。

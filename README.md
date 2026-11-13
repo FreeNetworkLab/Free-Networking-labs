@@ -59,7 +59,7 @@ CML Free にある次の制約を持たないことを目指しています。
 
 Ubuntu 24.04 のサーバーで、管理者のアカウント（`sudo` が使える人）が実行します。
 
-**配布版（おすすめ）**：Releases の `fnl-<バージョン>.tar.gz` を使います。画面はビルド済みで、ノードのイメージは
+**配布版（おすすめ）**：[Releases](https://github.com/FreeNetworkLab/Free-Networking-labs/releases) の `fnl-<バージョン>.tar.gz` を使います。画面はビルド済みで、ノードのイメージは
 ダウンロードするだけなので、数分で終わります。
 
 ```sh
@@ -73,7 +73,7 @@ sudo bash tools/add-user.sh <ユーザー名>          # 利用者のアカウ�
 **ソースから入れる場合**（開発者向け。ノードのイメージのビルドを含むため 1〜2 時間かかります）：
 
 ```sh
-git clone <このリポジトリ> && cd Free-Networking-labs
+git clone https://github.com/FreeNetworkLab/Free-Networking-labs.git && cd Free-Networking-labs
 bash tools/check-env.sh                          # 環境の確認（何も変更しない）。カーネルの機能も確かめる
 bash tools/install.sh --mode server --dry-run    # やることを表示だけして確認
 bash tools/install.sh --mode server              # 入れる（1〜2時間。イメージのビルドを含む）

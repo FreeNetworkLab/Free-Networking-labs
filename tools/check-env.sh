@@ -66,7 +66,7 @@ if command -v docker >/dev/null 2>&1; then
     DOCKER_OK=0
   fi
 else
-  ng "docker が入っていない" "https://docs.docker.com/engine/install/ubuntu/ の手順で入れてください（WSLではDocker Desktopではなく、WSLの中に入れる）"
+  warn "docker が入っていない" "tools/install.sh が入れます（手動なら https://docs.docker.com/engine/install/ubuntu/ 。WSLではDocker Desktopではなく、WSLの中に入れる）。カーネルの機能の確認は、入れたあとにもう一度"
   DOCKER_OK=0
 fi
 command -v containerlab >/dev/null 2>&1 && ok "containerlab が入っている（$(containerlab version 2>/dev/null | awk '/version/{print $2; exit}')）" || warn "containerlab が入っていない" "tools/install.sh が入れます（または clab-api-server のインストーラーが内蔵版を使います）"
@@ -118,7 +118,7 @@ if [ -n "$RESULT" ]; then
     # テストが動かなかった（sudoのパスワード、パッケージ不足など）。機能が無いとは判定しない
     warn "カーネルの機能を確認できなかった（テストが動きませんでした）" "$(echo "$RESULT" | head -n1)"
   elif echo "$RESULT" | grep -q '^SKIP'; then
-    warn "カーネルの機能を確認できなかった" "テスト用のパッケージ（iproute2・nftables）を取得できません。インターネットに接続してやり直してください"
+    warn "カーネルの機能を確認できなかった" "テスト用のパッケージ（iproute2・nftables）を取得できません。インターネットに接続してやり直してください。$([ "$WSL" = 1 ] && echo 'WSLでは、コンテナが名前を引けないことがあります（tools/install.sh が直します。手動なら /etc/docker/daemon.json に {"dns":["8.8.8.8"]} を書いて docker を再起動）。')"
   else
     feat() { # 名前 | 必須か(req/opt) | 説明 | 対処
       if echo "$RESULT" | grep -q "^OK $1\$"; then ok "$3"; else

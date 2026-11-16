@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Free-Networking-labs のインストール（共有サーバー用）。Ubuntu 24.04、管理者のアカウント（sudoが使える人）で実行する。
-# 管理者編マニュアル3章の手順1〜10を自動にしたもの。何度実行しても同じ結果になるよう、入っているものはスキップする。
+# 既定は「コンテナ方式」：Docker だけを入れ、clab-api-server・nginx・各プロキシをコンテナで動かす。
+# 利用者のアカウントはコンテナの中だけに持ち、ホストには作らない（設計メモ（非公開））。新規の導入のみ対応。
+# --legacy は従来の方式（ホストに clab-api-server・nginx・Node.js・sudoers を入れる）。すでにその方式で入れたサーバーの更新用。
+# 何度実行しても同じ結果になるよう、入っているものはスキップする。
 #
 # 使い方:
 #   bash tools/install.sh --mode server --dry-run     ← まず、やることを表示だけして確認する
@@ -9,7 +12,9 @@
 #   --dry-run        何も変更せず、実行するコマンドだけを表示する
 #   --skip-images    ノードのイメージのビルド・取得を飛ばす（あとで手動で行う）
 #   --build-images   配布版でも、イメージを取得せずソースからビルドする
+#   --ignore-ports   ポート 80・443・8090 を他のものが使っていても進める（nginx が起動できなくなる）
 #   --hostname NAME  HTTPS証明書に入れるホスト名（既定：このサーバーの hostname）
+#   --legacy         従来の方式（ホストに直接入れる）。既存のサーバーの更新用
 #
 # すでに動いているサーバーに再度実行しても、入っているものはスキップし、設定が変わらない限りサービスは再起動しない。
 # 個人のWSL向け（--mode personal）は、今後対応する。先に tools/check-env.sh でWSLのカーネルの機能を確かめられる。
@@ -21,6 +26,8 @@ MODE=""
 DRY=0
 SKIP_IMAGES=0
 BUILD_IMAGES=0
+IGNORE_PORTS=0
+LEGACY=0
 HOST_NAME=$(hostname)
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -28,8 +35,10 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY=1 ;;
     --skip-images) SKIP_IMAGES=1 ;;
     --build-images) BUILD_IMAGES=1 ;;
+    --ignore-ports) IGNORE_PORTS=1 ;;
+    --legacy) LEGACY=1 ;;
     --hostname) HOST_NAME="${2:-}"; shift ;;
-    -h | --help) sed -n 2,15p "$0"; exit 0 ;;
+    -h | --help) sed -n 2,20p "$0"; exit 0 ;;
     *) echo "不明なオプション: $1" >&2; exit 2 ;;
   esac
   shift
@@ -56,6 +65,36 @@ echo "  OS: ${PRETTY_NAME}   カーネル: $(uname -r)   管理者: $ME   リポ
 [ "$(ps -p 1 -o comm=)" = systemd ] || { echo "systemd が動いていません" >&2; [ "$DRY" = 1 ] || exit 1; }
 sudo -n true 2>/dev/null || echo "  （sudo のパスワードを聞かれることがあります）"
 
+# 待ち受けポートの確認。入れ終わってから nginx が起動できず気づく、を防ぐ（80・443は nginx、8090は clab-api-server なら再実行なので進める）
+WSL=0; grep -qi microsoft /proc/version 2>/dev/null && WSL=1
+PORT_BAD=0
+owner_of() { # ポート → 待ち受けているプロセス名。まず自分の権限で、分からなければ sudo で見る（他のユーザーのプロセスは sudo が要る）
+  local l o
+  for l in "ss -ltnpH" "sudo ss -ltnpH"; do
+    o=$($l "( sport = :$1 )" 2>/dev/null | grep -oE '\(\("[^"]+"' | head -n1 | tr -d '("' || true)
+    if [ -n "$o" ]; then printf '%s' "$o"; return 0; fi
+  done
+  return 0
+}
+for p in ${FNL_CHECK_PORTS:-80 443 8090}; do
+  # 使われているかは、sudo なしで確かめる（sudo が使えなくても、使用中を見逃さない）
+  [ -n "$(ss -ltnH "( sport = :$p )" 2>/dev/null)" ] || continue
+  owner=$(owner_of "$p")
+  case "$p:$owner" in 80:nginx | 443:nginx | 8090:clab-api-serve*) continue ;; esac
+  echo "  ポート $p を ${owner:-持ち主の分からない（別の環境かもしれない）プロセス} が使っています"
+  PORT_BAD=1
+done
+if [ "$PORT_BAD" = 1 ]; then
+  echo "  → このまま入れると、nginx などが起動できません。先に、使っているものを止めてください。"
+  [ "$WSL" = 1 ] && echo "  → WSL では、別のディストリビューションが動いたままだと、ポートが重なります。PowerShell で wsl -l -v を実行し、wsl --terminate <名前> で止めます。"
+  echo "  → 承知のうえで進めるなら --ignore-ports を付けて実行します。"
+  if [ "$IGNORE_PORTS" = 1 ]; then echo "  （--ignore-ports のため進めます）"
+  elif [ "$DRY" = 1 ]; then echo "  （--dry-run のため、ここでは止めません。実際の実行では、ここで止まります）"
+  else exit 1; fi
+else
+  echo "  ポート 80・443・8090: 使われていない（または、このシステムのもの）"
+fi
+
 step "1. 基本のパッケージ"
 run sudo apt-get update
 run sudo apt-get install -y git openssl rsync curl ca-certificates gnupg
@@ -77,6 +116,112 @@ id -nG "$ME" | tr ' ' '\n' | grep -qx docker || {
   echo "  ※ docker グループに入れました。入れ直し（ログインし直し）が必要です。このスクリプトは sudo docker で続けます"
 }
 if docker info >/dev/null 2>&1; then DOCKER=(docker); else DOCKER=(sudo docker); fi
+
+# コンテナの中から名前が引けるか。WSL の既定では、コンテナが WSL の DNS 中継に届かず、引けないことがある
+if [ "$DRY" = 1 ]; then
+  echo "  （コンテナの DNS の確認は --dry-run のため飛ばします。引けない WSL では /etc/docker/daemon.json に dns を書きます）"
+else
+  "${DOCKER[@]}" pull -q alpine:3.20 >/dev/null 2>&1 || true
+  if "${DOCKER[@]}" run --rm alpine:3.20 nslookup ghcr.io >/dev/null 2>&1; then
+    echo "  コンテナから名前が引ける"
+  elif [ ! -e /etc/docker/daemon.json ]; then
+    echo "  コンテナから名前が引けません。/etc/docker/daemon.json に dns を書いて Docker を再起動します"
+    sh_run "echo '{\"dns\":[\"8.8.8.8\",\"1.1.1.1\"]}' | sudo tee /etc/docker/daemon.json >/dev/null"
+    run sudo systemctl restart docker
+    "${DOCKER[@]}" run --rm alpine:3.20 nslookup ghcr.io >/dev/null 2>&1 \
+      && echo "  → 引けるようになりました" \
+      || echo "  → まだ引けません。ネットワークのファイアウォールやプロキシを確認してください（ノードの動作には影響しませんが、check-env のカーネルテストは SKIP になります）"
+  else
+    echo "  コンテナから名前が引けません。/etc/docker/daemon.json が既にあるので、書き換えません。dns を足してください（例：\"dns\": [\"8.8.8.8\"]）"
+  fi
+fi
+
+pull_images() {
+if [ "$SKIP_IMAGES" = 1 ]; then echo "  --skip-images のため飛ばします（あとで手動で。管理者編マニュアル3章の手順5）"; else
+  # タグは frontend/src/types/lab.ts の PALETTE_NODE_CONFIGS と合わせる
+  FRR=$(grep -oE "fnl/frr:[0-9]+" "$REPO/frontend/src/types/lab.ts" | head -1)
+  L2=$(grep -oE "fnl/l2switch:[0-9]+" "$REPO/frontend/src/types/lab.ts" | head -1)
+  L3=$(grep -oE "fnl/l3switch:[0-9]+" "$REPO/frontend/src/types/lab.ts" | head -1)
+  echo "  画面が使うタグ: $FRR / $L2 / $L3"
+  if [ -n "$FNL_REGISTRY" ] && [ "$BUILD_IMAGES" = 0 ]; then
+    echo "  配布版 $FNL_VERSION：$FNL_REGISTRY からイメージを取得します（ビルドしません）"
+    for t in "$FRR" "$L2" "$L3"; do
+      remote="$FNL_REGISTRY/fnl-${t#fnl/}"   # fnl/frr:3 → <置き場>/fnl-frr:3
+      run "${DOCKER[@]}" pull "$remote"
+      run "${DOCKER[@]}" tag "$remote" "$t"
+    done
+  else
+    run "${DOCKER[@]}" build -t "$FRR" "$REPO/backend/frr-router"
+    run "${DOCKER[@]}" build -t "$L2" "$REPO/backend/l2switch"
+    run "${DOCKER[@]}" build -t "$L3" -f "$REPO/backend/l2switch/Dockerfile.l3" "$REPO/backend/l2switch"
+  fi
+  run "${DOCKER[@]}" pull alpine:3.20
+  echo "  Wireshark のイメージは、先に取得しておく（無いと最初のキャプチャが45秒の制限で失敗する）"
+  run "${DOCKER[@]}" pull ghcr.io/srl-labs/wireshark-vnc-docker:latest
+fi
+}
+
+if [ "$LEGACY" = 0 ]; then
+  # ---- コンテナ方式 ----
+  if [ "$DRY" = 0 ] && { systemctl is-active --quiet clab-api-server 2>/dev/null || [ -x /usr/local/bin/clab-api-server ]; }; then
+    echo "このサーバーには、従来の方式（ホストの clab-api-server）が入っています。コンテナ方式へは自動で移行しません（アカウントの持ち方が変わるため）。" >&2
+    echo "従来の方式のまま更新するなら --legacy を付けてください。コンテナ方式で入れるなら、新しいサーバーに入れてください。" >&2
+    exit 1
+  fi
+  step "3. ノードのイメージ"
+  pull_images
+
+  step "4. EdgeShark（キャプチャの裏方）"
+  sh_run "cd '$REPO/backend/edgeshark' && ${DOCKER[*]} compose up -d"
+
+  step "5. 画面とプロキシの用意（Docker の中で行う。ホストに Node.js は要りません）"
+  NODE_RUN="${DOCKER[*]} run --rm -u $(id -u):$(id -g) -e HOME=/tmp -e npm_config_cache=/tmp/.npm"
+  if [ -f "$REPO/frontend/dist/index.html" ]; then echo "  ビルド済みの画面があります（配布版）"; else
+    sh_run "$NODE_RUN -v '$REPO/frontend':/w -w /w node:22-alpine sh -c 'npm ci --no-audit --no-fund && npm run build'"
+  fi
+  for p in console-proxy ovs-helper capture-proxy collab-proxy; do
+    [ -d "$REPO/backend/$p/node_modules" ] && continue   # 配布版は依存を同梱している
+    [ -f "$REPO/backend/$p/package.json" ] && sh_run "$NODE_RUN -v '$REPO/backend/$p':/w -w /w node:22-alpine npm install --omit=dev --no-audit --no-fund"
+  done
+
+  step "6. 証明書（自己署名）"
+  CAPCERT="$REPO/backend/capture-proxy/certs"
+  if [ -f "$CAPCERT/cert.pem" ]; then echo "  capture-proxy の証明書あり"; else
+    run mkdir -p "$CAPCERT"
+    run openssl req -x509 -newkey rsa:2048 -keyout "$CAPCERT/key.pem" -out "$CAPCERT/cert.pem" -days 825 -nodes \
+      -subj "/CN=capture-proxy" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+  fi
+  NGX="$REPO/backend/nginx/certs"
+  if [ -f "$NGX/cert.pem" ]; then echo "  HTTPS の証明書あり（作り直すなら $NGX を消す）"; else
+    IP=$(hostname -I | awk '{print $1}')
+    run mkdir -p "$NGX"
+    run openssl req -x509 -newkey rsa:2048 -keyout "$NGX/key.pem" -out "$NGX/cert.pem" -days 825 -nodes \
+      -subj "/CN=$HOST_NAME" -addext "subjectAltName=DNS:$HOST_NAME,DNS:localhost,IP:${IP:-127.0.0.1},IP:127.0.0.1"
+  fi
+
+  step "7. 起動（clab-api-server・ovs-helper・プロキシ・nginx。最初の管理者もここで作ります）"
+  sh_run "bash '$REPO/backend/compose/init.sh'"
+
+  step "8. 動作の確認"
+  if [ "$DRY" = 1 ]; then echo "  （--dry-run のため確認は飛ばします）"; else
+    "${DOCKER[@]}" compose -f "$REPO/backend/compose/compose.yaml" ps --format 'table {{.Service}}\t{{.State}}' || true
+    sleep 3
+    curl -sk -m 8 -o /dev/null -w '  clab-api-server /health: HTTP %{http_code}\n' https://localhost:8090/health || true
+    curl -sk -m 8 -o /dev/null -w '  画面 https://localhost/: HTTP %{http_code}\n' https://localhost/ || true
+    if [ "${DOCKER[0]}" = sudo ]; then sg docker -c "bash '$REPO/tools/check-env.sh'" || true; else bash "$REPO/tools/check-env.sh" || true; fi
+  fi
+
+  cat <<E
+
+完了しました。次にやること:
+  1. ブラウザで https://${HOST_NAME}/ を開き、上に表示された管理者でログインする（初回は証明書の警告）
+  2. 利用者のアカウントを作る: bash tools/add-user.sh <ユーザー名>
+  3. ルーター・スイッチ・PCを置いて「起動」→ コンソールで ping、線を右クリック →「パケットキャプチャ」
+※ docker グループへの追加を行った場合は、いちどログインし直してください。
+※ 利用者のアカウントはコンテナの中（Docker のボリューム fnl-etc）にあります。バックアップの対象に入れてください。
+E
+  exit 0
+fi
 
 step "3. clab-api-server（Linux アカウントでの認証、ラボの分離）"
 if [ -x /usr/local/bin/clab-api-server ]; then
@@ -124,28 +269,7 @@ NODE=$(command -v node || echo "$HOME/.nvm/versions/node/<node 24>/bin/node")
 echo "  node: $NODE"
 
 step "5. ノードのイメージ"
-if [ "$SKIP_IMAGES" = 1 ]; then echo "  --skip-images のため飛ばします（あとで手動で。管理者編マニュアル3章の手順5）"; else
-  # タグは frontend/src/types/lab.ts の PALETTE_NODE_CONFIGS と合わせる
-  FRR=$(grep -oE "fnl/frr:[0-9]+" "$REPO/frontend/src/types/lab.ts" | head -1)
-  L2=$(grep -oE "fnl/l2switch:[0-9]+" "$REPO/frontend/src/types/lab.ts" | head -1)
-  L3=$(grep -oE "fnl/l3switch:[0-9]+" "$REPO/frontend/src/types/lab.ts" | head -1)
-  echo "  画面が使うタグ: $FRR / $L2 / $L3"
-  if [ -n "$FNL_REGISTRY" ] && [ "$BUILD_IMAGES" = 0 ]; then
-    echo "  配布版 $FNL_VERSION：$FNL_REGISTRY からイメージを取得します（ビルドしません）"
-    for t in "$FRR" "$L2" "$L3"; do
-      remote="$FNL_REGISTRY/fnl-${t#fnl/}"   # fnl/frr:3 → <置き場>/fnl-frr:3
-      run "${DOCKER[@]}" pull "$remote"
-      run "${DOCKER[@]}" tag "$remote" "$t"
-    done
-  else
-    run "${DOCKER[@]}" build -t "$FRR" "$REPO/backend/frr-router"
-    run "${DOCKER[@]}" build -t "$L2" "$REPO/backend/l2switch"
-    run "${DOCKER[@]}" build -t "$L3" -f "$REPO/backend/l2switch/Dockerfile.l3" "$REPO/backend/l2switch"
-  fi
-  run "${DOCKER[@]}" pull alpine:3.20
-  echo "  Wireshark のイメージは、先に取得しておく（無いと最初のキャプチャが45秒の制限で失敗する）"
-  run "${DOCKER[@]}" pull ghcr.io/srl-labs/wireshark-vnc-docker:latest
-fi
+pull_images
 
 step "6. EdgeShark（キャプチャの裏方）"
 sh_run "cd '$REPO/backend/edgeshark' && ${DOCKER[*]} compose up -d"
@@ -202,7 +326,8 @@ if [ "$DRY" = 1 ]; then echo "  （--dry-run のため確認は飛ばします�
   for s in console-proxy ovs-helper capture-proxy collab-proxy; do printf '  %-18s %s\n' "$s" "$(systemctl --user is-active $s)"; done
   curl -sk -m 8 -o /dev/null -w '  clab-api-server /health: HTTP %{http_code}\n' https://localhost:8090/health || true
   curl -sk -m 8 -o /dev/null -w '  画面 https://localhost/: HTTP %{http_code}\n' https://localhost/ || true
-  bash "$REPO/tools/check-env.sh" || true
+  # docker グループに入れた直後は、このシェルにはまだ反映されていない。sg で反映した状態で確認する
+  if [ "${DOCKER[0]}" = sudo ]; then sg docker -c "bash '$REPO/tools/check-env.sh'" || true; else bash "$REPO/tools/check-env.sh" || true; fi
 fi
 
 cat <<E

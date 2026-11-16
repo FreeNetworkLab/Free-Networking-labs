@@ -25,6 +25,7 @@ const LISTEN_HOST = process.env.LISTEN_HOST ?? '127.0.0.1'
 const CLAB_API_BASE_URL = process.env.CLAB_API_BASE_URL ?? 'https://localhost:8090'
 const ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
 // sudoersで限定許可した専用ラッパー（frr-config-init.sh、要セットアップ）
+const NO_SUDO = process.env.OVS_HELPER_NO_SUDO === '1'
 const FRR_CONFIG_INIT_BIN = process.env.OVS_HELPER_FRR_CONFIG_INIT_BIN ?? '/usr/local/sbin/ovs-helper-frr-config-init'
 
 // ラボ名・ルーター名はファイルパスの一部に使うため、パストラバーサル等を防ぐために
@@ -151,9 +152,12 @@ async function readJsonBody(req) {
 // mode='switch'はL2スイッチの設定保存先（switch-config/<名前>/、空のディレクトリ）を作る（2026-10-14）
 function initNodeConfig(username, labName, nodeName, mode) {
   return new Promise((resolve, reject) => {
+    // コンテナ版（OVS_HELPER_NO_SUDO=1）は、権限を絞ったコンテナの中で直接実行する（sudoは使わない）
+    const wrapperArgs = [username, labName, nodeName, mode]
+    const [cmd, cmdArgs] = NO_SUDO ? [FRR_CONFIG_INIT_BIN, wrapperArgs] : ['sudo', ['-n', FRR_CONFIG_INIT_BIN, ...wrapperArgs]]
     const child = execFile(
-      'sudo',
-      ['-n', FRR_CONFIG_INIT_BIN, username, labName, nodeName, mode],
+      cmd,
+      cmdArgs,
       (error, _stdout, stderr) => {
         const what = mode === 'switch' ? 'スイッチ' : 'FRR'
         if (error) reject(new Error(`${what}設定の用意に失敗しました: ${String(stderr).trim() || error.message}`))

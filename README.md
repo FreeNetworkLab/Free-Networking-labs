@@ -42,7 +42,7 @@ CML Free にある次の制約を持たないことを目指しています。
                               containerlab ── Docker ── FRR / L2・L3 スイッチ / PC
 ```
 
-- 認証は Linux のアカウント（PAM）をそのまま使います。独自のユーザー DB はありません。
+- 認証は Linux のアカウント（PAM）をそのまま使います。独自のユーザー DB はありません。アカウントは clab-api-server のコンテナの中にだけ作り、サーバー（ホスト）には作りません。
 - `backend/` に、プロキシ 4 つとノードのイメージ（`frr-router/`・`l2switch/`）、nginx の設定があります。
 - `frontend/` に画面があります。
 
@@ -51,8 +51,7 @@ CML Free にある次の制約を持たないことを目指しています。
 ## 動作環境
 
 - Ubuntu Server 24.04 LTS（カーネル 6.7 以上。STP が MST のブリッジ機能を使うため）
-- Docker 29.x、containerlab、clab-api-server
-- Node.js 24（画面のビルドとプロキシの実行）
+- Docker 29.x（containerlab・clab-api-server・nginx・プロキシは、コンテナで動きます。`install.sh` が Docker ごと入れます）
 - 目安：4 コア・メモリ 12 GB ほどで、40 人規模の授業を想定（実測は管理者編の 2 章）
 
 ## セットアップ（共有サーバー）
@@ -66,8 +65,8 @@ Ubuntu 24.04 のサーバーで、管理者のアカウント（`sudo` が使え
 tar xzf fnl-<バージョン>.tar.gz && cd fnl-<バージョン>
 sha256sum -c ../fnl-<バージョン>.tar.gz.sha256   # 任意：壊れていないかの確認（.sha256 を同じ場所に置く）
 bash tools/install.sh --mode server --dry-run    # やることを表示だけして確認
-bash tools/install.sh --mode server              # 入れる
-sudo bash tools/add-user.sh <ユーザー名>          # 利用者のアカウントを作る
+bash tools/install.sh --mode server              # 入れる（最後に、最初の管理者のパスワードが1回だけ表示されます）
+bash tools/add-user.sh <ユーザー名>               # 利用者のアカウントを作る
 ```
 
 **ソースから入れる場合**（開発者向け。ノードのイメージのビルドを含むため 1〜2 時間かかります）：
@@ -77,13 +76,15 @@ git clone https://github.com/FreeNetworkLab/Free-Networking-labs.git && cd Free-
 bash tools/check-env.sh                          # 環境の確認（何も変更しない）。カーネルの機能も確かめる
 bash tools/install.sh --mode server --dry-run    # やることを表示だけして確認
 bash tools/install.sh --mode server              # 入れる（1〜2時間。イメージのビルドを含む）
-sudo bash tools/add-user.sh <ユーザー名>          # 利用者のアカウントを作る（ログインはFNLの画面だけ）
+bash tools/add-user.sh <ユーザー名>               # 利用者のアカウントを作る（ログインはFNLの画面だけ）
 ```
 
+- 導入はコンテナ方式です（新規のサーバー向け）。従来のようにホストへ直接入れる方式は `--legacy` で残してあります（すでにその方式で入れたサーバーの更新用）。
+- 利用者のアカウントは、コンテナの中の Docker ボリューム `fnl-etc` にあります。**バックアップの対象に入れてください**（失うと、全員のログインとラボの所有が壊れます）。
 - 手順の中身と、手動で行う場合は、[管理者編マニュアル](docs/manual/操作マニュアル_管理者編.pdf)の 3 章にあります。
 - ファイアウォール（ufw）やSSHの設定は、インストールでは変更しません。
-- 利用者のアカウントは、`clab_api` グループだけに入れ、`docker`・`sudo`・`clab_admins` には入れません。
-  `docker` グループはサーバーの root と同じ権限になります。`add-user.sh` は、この形で作ります。
+- 利用者のアカウントは、`clab_api` グループだけに入れ、`docker`・`sudo`・`clab_admins` には入れません。`add-user.sh` は、この形で作ります。
+  なお、サーバーの `docker` グループは、サーバーの root と同じ権限です。管理者以外は入れないでください。
 - 個人の PC の WSL 上で動かすことは、今後対応する予定です。先に `tools/check-env.sh` で、WSL のカーネルが必要な機能
   （STP の MST、netem、bonding、nftables、macvlan など）を満たすか確かめられます。
 

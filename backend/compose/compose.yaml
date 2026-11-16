@@ -1,0 +1,97 @@
+# Free-Networking-labs のコンテナ構成（設計：設計メモ（非公開））。
+# 使い方：backend/compose/init.sh を実行する（.env の作成、最初の管理者の作成、起動まで行う）。
+#
+# すべて network_mode: host。nginx の設定（backend/nginx/fnl.conf）が 127.0.0.1:8082〜8090 を指しているため、変えずに使う。
+# アカウントは clab-api-server のコンテナの /etc（名前付きボリューム fnl-etc）にだけ持ち、ホストには作らない。
+name: fnl
+
+x-proxy: &proxy
+  image: node:22-alpine
+  network_mode: host
+  restart: unless-stopped
+  read_only: true
+  user: "${FNL_UID}:${FNL_GID}"
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  clab-api-server:
+    # 上流の公式イメージ。root・Dockerソケット・ホストPIDが要る（今のホスト版と同じ権限）
+    image: ghcr.io/srl-labs/clab-api-server/clab-api-server:${CLAB_API_SERVER_VERSION:-v0.10.0}
+    command: ["clab-api-server"]
+    network_mode: host
+    pid: host
+    privileged: true
+    restart: unless-stopped
+    environment:
+      API_PORT: "8090"
+      JWT_SECRET: "${JWT_SECRET:?init.sh を実行して .env を作ってください}"
+      JWT_EXPIRATION: "${JWT_EXPIRATION:-8h}"
+      API_USER_GROUP: clab_api
+      SUPERUSER_GROUP: clab_admins
+      CLAB_LABS_ROOT: "${FNL_LABS_ROOT}"
+      LOG_LEVEL: info
+    volumes:
+      # アカウント（passwd/shadow/group）。/etc 全体をボリュームにする（1ファイルずつのbind mountはuseraddが失敗する）
+      - fnl-etc:/etc
+      - fnl-api-tls:/root/.config/clab-api-server
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/netns:/var/run/netns
+      - /var/lib/docker/containers:/var/lib/docker/containers
+      # ラボのルートは、ホストとコンテナで同じパスにする（containerlabがホストのパスでbind mountするため）
+      - ${FNL_LABS_ROOT}:${FNL_LABS_ROOT}
+
+  ovs-helper:
+    # ラボのノードの設定の保存先を作る。ホストのsudoersの代わりに、権限を3つに絞ったコンテナで動かす。
+    # Dockerソケットは渡さない。アカウントは読み取り専用（uid/gidを引くだけ）
+    <<: *proxy
+    user: root
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    working_dir: /app
+    command: ["node", "server.js"]
+    environment:
+      OVS_HELPER_NO_SUDO: "1"
+      OVS_HELPER_FRR_CONFIG_INIT_BIN: /app/frr-config-init.sh
+      FNL_LABS_ROOT: "${FNL_LABS_ROOT}"
+      FNL_PASSWD_FILE: /accounts/passwd
+    volumes:
+      - ../ovs-helper:/app:ro
+      - fnl-etc:/accounts:ro
+      - ${FNL_LABS_ROOT}:${FNL_LABS_ROOT}
+
+  console-proxy:
+    <<: *proxy
+    working_dir: /app
+    command: ["node", "server.js"]
+    volumes:
+      - ../console-proxy:/app:ro
+
+  capture-proxy:
+    <<: *proxy
+    working_dir: /app
+    command: ["node", "server.js"]
+    volumes:
+      - ../capture-proxy:/app:ro
+
+  collab-proxy:
+    <<: *proxy
+    working_dir: /app
+    command: ["node", "server.js"]
+    volumes:
+      - ../collab-proxy:/app:ro
+
+  nginx:
+    image: nginx:1.27-alpine
+    network_mode: host
+    restart: unless-stopped
+    depends_on: [clab-api-server]
+    volumes:
+      - ../nginx/fnl.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../nginx/certs:/etc/nginx/ssl/fnl:ro
+      - ../../frontend/dist:/var/www/free-networking-labs:ro
+
+volumes:
+  fnl-etc:
+    name: fnl-etc
+  fnl-api-tls:
+    name: fnl-api-tls

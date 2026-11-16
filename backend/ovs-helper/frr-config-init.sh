@@ -25,9 +25,14 @@
 #   sudo chmod 440 /etc/sudoers.d/ovs-helper-frr-config-init
 #   sudo visudo -c
 
+# コンテナ版（設計メモ（非公開））の環境変数。どちらも無ければ従来どおり（ホストのアカウントを使う）
+#   FNL_LABS_ROOT   ラボのルート（既定 /var/lib/containerlab/labs）
+#   FNL_PASSWD_FILE アカウントのpasswdの場所。指定するとgetentの代わりにここからuid/gidを引く
+#                   （clab-api-serverのコンテナの/etcボリュームを読み取り専用で渡す）
+
 set -eu
 
-ROOT=/var/lib/containerlab/labs
+ROOT="${FNL_LABS_ROOT:-/var/lib/containerlab/labs}"
 user="${1:-}"
 lab="${2:-}"
 router="${3:-}"
@@ -41,7 +46,12 @@ printf '%s' "$lab"    | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_-]*$'  || fail "invalid
 printf '%s' "$router" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_-]*$'  || fail "invalid router"
 case "$mode" in router) sub=frr-config ;; switch) sub=switch-config ;; *) fail "invalid mode" ;; esac
 
-entry="$(getent passwd "$user")" || fail "unknown user"
+if [ -n "${FNL_PASSWD_FILE:-}" ]; then
+  entry="$(awk -F: -v u="$user" '$1 == u { print; exit }' "$FNL_PASSWD_FILE")"
+  [ -n "$entry" ] || fail "unknown user"
+else
+  entry="$(getent passwd "$user")" || fail "unknown user"
+fi
 uid="$(printf '%s' "$entry" | cut -d: -f3)"
 gid="$(printf '%s' "$entry" | cut -d: -f4)"
 

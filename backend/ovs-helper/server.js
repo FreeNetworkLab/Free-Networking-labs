@@ -208,9 +208,54 @@ async function handleNodeConfig(req, res, token, mode) {
   sendJson(res, 200, { message: `${mode} ${nodeName} の設定の保存先を用意しました` })
 }
 
+// 管理者が、ユーザーのラボのフォルダをまるごと消す（ユーザー削除の前に呼ぶ。2026-11-18）。
+// 認可：clab-api-serverの GET /api/v1/users は、管理者（clab_admins）だけが200になる。それをそのまま判定に使う（自前の認証は持たない）。
+// コンテナ版（OVS_HELPER_NO_SUDO=1）だけ。従来の方式（ホストのsudo）は対象外
+const PURGE_BIN = process.env.OVS_HELPER_PURGE_USER_LABS_BIN ?? '/app/purge-user-labs.sh'
+
+async function verifySuperuser(token) {
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      `${CLAB_API_BASE_URL}/api/v1/users`,
+      { headers: { Authorization: `Bearer ${token}` }, rejectUnauthorized: false },
+      (res) => {
+        res.resume()
+        resolve(res.statusCode === 200)
+      },
+    )
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+async function handlePurgeUserLabs(req, res, token) {
+  if (!NO_SUDO) {
+    sendJson(res, 501, { error: 'この操作は、コンテナ方式の導入だけで使えます' })
+    return
+  }
+  const payload = await readJsonBody(req)
+  const target = payload?.username
+  if (typeof target !== 'string' || !SAFE_USERNAME_PATTERN.test(target)) {
+    sendJson(res, 400, { error: 'usernameの形式が不正です' })
+    return
+  }
+  if (!(await verifySuperuser(token))) {
+    sendJson(res, 403, { error: '管理者だけが使えます' })
+    return
+  }
+  await new Promise((resolve, reject) => {
+    execFile(PURGE_BIN, [target], (error, _stdout, stderr) => {
+      if (error) reject(new Error(`ラボの削除に失敗しました: ${String(stderr).trim() || error.message}`))
+      else resolve()
+    })
+  })
+  sendJson(res, 200, { message: `${target} のラボのフォルダを消しました` })
+}
+
 const ROUTES = {
   '/frr-config': handleFrrConfig,
   '/switch-config': handleSwitchConfig,
+  '/purge-user-labs': handlePurgeUserLabs,
 }
 
 const server = createServer((req, res) => {

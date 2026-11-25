@@ -5,7 +5,9 @@ import ConsolePane from './components/ConsolePane'
 import LoginForm from './components/LoginForm'
 import ShareViewer from './components/ShareViewer'
 import { getSharedLab, shareIdFromHash, type ShareRole } from './api/collabClient'
-import { setShareRoute } from './api/client'
+import { listUsers, setShareRoute } from './api/client'
+import AdminUsers from './components/AdminUsers'
+import ChangePasswordDialog from './components/ChangePasswordDialog'
 import Brand from './components/Brand'
 import ServerStatusBar, {
   SERVER_STATUS_ITEMS,
@@ -84,6 +86,23 @@ function App() {
     setView('home')
   }
   const logout = useAuthStore((s) => s.logout)
+  // 管理者（clab_admins）かどうか。ユーザー一覧のAPIは管理者だけが呼べる（一般の利用者は403）ので、
+  // ログイン後に1回呼んで、通れば管理者としてナビに「ユーザー管理」を出す（2026-11-16）
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false)
+  const [adminUser, setAdminUser] = useState<string | null>(null)
+  useEffect(() => {
+    if (!username || shareId) return
+    let cancelled = false
+    listUsers().then(
+      () => !cancelled && setAdminUser(username),
+      () => undefined,
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [username, shareId])
+  // 別のアカウントでログインし直した時に、前の人の結果を引き継がないよう、ユーザー名で照合する
+  const isAdmin = !!username && !shareId && adminUser === username
   const resizingRef = useRef(false)
   // 画面下部に出すサーバーの使用状況（2026-10-14追加、components/ServerStatusBar.tsx）
   const [statusItems, setStatusItems] = useState<ServerStatusItem[]>(readServerStatusItems)
@@ -170,6 +189,17 @@ function App() {
           </span>
         )}
         <div className="app-nav__spacer" />
+        {isAdmin && (
+          <button
+            className="app-nav__btn"
+            onClick={() => setView(view === 'admin' ? 'home' : 'admin')}
+            title="ユーザー管理（管理者だけ）"
+            aria-label="ユーザー管理"
+            aria-pressed={view === 'admin'}
+          >
+            <Icon name="users" />
+          </button>
+        )}
         <div className="server-status-menu" ref={statusMenuRef}>
           <button
             className="app-nav__btn"
@@ -205,12 +235,16 @@ function App() {
           <Icon name={theme === 'light' ? 'moon' : 'sun'} />
         </button>
         <span className="app-nav__user">@{username}</span>
+        <button className="app-nav__btn" onClick={() => setPasswordDialogOpen(true)} title="パスワードを変える" aria-label="パスワードの変更">
+          <Icon name="key" />
+        </button>
         <button className="app-nav__btn" onClick={logout} title="ログアウト" aria-label="ログアウト">
           <Icon name="logout" />
         </button>
       </nav>
       <div className="app-content">
         {view === 'home' && !editing && <Home />}
+        {view === 'admin' && isAdmin && <AdminUsers />}
         {view === 'editor' && <TopologyEditor />}
         {/* ConsolePane（xterm.js＋WebSocket接続を持つ）はApp直下にこの1箇所だけマウントする。
             トポロジエディタ側にもう1つ同じConsolePaneをマウントすると同じセッションへの接続が
@@ -228,6 +262,7 @@ function App() {
           <ConsolePane />
         </div>
       </div>
+      {passwordDialogOpen && <ChangePasswordDialog onClose={() => setPasswordDialogOpen(false)} />}
       {!editing && <ServerStatusBar items={statusItems} />}
     </div>
   )

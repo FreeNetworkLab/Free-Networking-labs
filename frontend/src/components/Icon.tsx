@@ -28,8 +28,27 @@ export type IconName =
   | 'pc'
   | 'label'
   | 'area'
+  | 'users'
+  | 'key'
 
 const STROKE: Record<Exclude<IconName, 'play' | 'stop'>, ReactNode> = {
+  // 鍵（パスワードの変更）
+  key: (
+    <>
+      <circle cx="8" cy="15" r="4" />
+      <path d="M11 12l9-9" />
+      <path d="M16 7l3 3" />
+    </>
+  ),
+  // 人の並び（ユーザー管理）
+  users: (
+    <>
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6" />
+      <path d="M16 4.7a3.5 3.5 0 0 1 0 6.6" />
+      <path d="M18 14.3c2.2.7 3.5 2.6 3.5 5.7" />
+    </>
+  ),
   // 棒グラフ（サーバーの使用状況）
   chart: (
     <>

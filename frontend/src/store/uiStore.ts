@@ -11,7 +11,7 @@
 // ドッキング表示する（store/consoleStore.tsのopenConsole、TopologyEditor.tsx参照）。
 import { create } from 'zustand'
 
-export type View = 'home' | 'editor'
+export type View = 'home' | 'editor' | 'admin'
 
 // エディタを「新規作成」で開くか、「既存ラボを読み込んで編集」で開くか。
 // editモードでautoOpenConsoleNodeを指定すると、読み込み完了後にそのノードのコンソールを

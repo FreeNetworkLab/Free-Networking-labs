@@ -150,8 +150,8 @@ L2スイッチのイメージ（`fnl/l2switch:10`〜）に、FRR（zebra・stati
 設計は`設計メモ（非公開）`。
 
 ```
-docker build -t fnl/l2switch:12 backend/l2switch
-docker build -t fnl/l3switch:9 -f backend/l2switch/Dockerfile.l3 backend/l2switch
+docker build -f backend/l2switch/Dockerfile -t fnl/l2switch:13 .        # リポジトリのルートで
+docker build -f backend/l2switch/Dockerfile.l3 -t fnl/l3switch:10 .
 ```
 
 | コマンド | 内容 |

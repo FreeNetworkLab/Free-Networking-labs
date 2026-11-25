@@ -4,13 +4,25 @@
 // clab-api-serverの`GET /capture/wireshark-vnc-sessions/{sessionId}/vnc/{proxyPath}`は
 // Authorizationヘッダーでしか認証できず、ブラウザの新規タブ/WebSocketはカスタムヘッダーを
 // 設定できないため、console-proxyと同様に専用の中継プロキシ（capture-proxy）を経由する。
-// 違いは、capture-proxyはトークンをURLのパスに埋め込む方式にしている点
-// （noVNCは複数ファイルを素のGETで読みに行く通常のWebアプリのため、
-// 「最初の1メッセージでトークンを送る」ようなハンドシェイクが使えない。
-// backend/capture-proxy/README.md参照）。
+// 違いは、トークンをURLに出さず、「使い切りのチケット＋Cookie」で渡す点（2026-11-18に変更。以前は
+// トークンをURLのパスに埋め込んでいて、nginxのアクセスログやブラウザの履歴に、8時間有効なトークンが残った）。
+// noVNCは複数ファイルを素のGETで読みに行く通常のWebアプリのため、「最初の1メッセージでトークンを送る」
+// ようなハンドシェイクは使えない。backend/capture-proxy/README.md参照。
 import { createCaptureSessions, deleteCaptureSession, getCaptureSessionReady, getAuthToken, shareCaptureUrl, type CaptureTarget } from './client'
 
 const CAPTURE_PROXY_BASE_URL = import.meta.env.VITE_CAPTURE_PROXY_URL ?? 'https://localhost:8084'
+
+// 新しいタブを開くための、使い切りのチケット（30秒で失効）をもらう。トークンはヘッダーで渡し、URLには出さない
+async function requestTicket(token: string): Promise<string> {
+  const res = await fetch(`${CAPTURE_PROXY_BASE_URL}/capture/_ticket`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`キャプチャの認証に失敗しました（HTTP ${res.status}）`)
+  const body = (await res.json()) as { ticket?: string }
+  if (!body.ticket) throw new Error('キャプチャの認証に失敗しました')
+  return body.ticket
+}
 
 // セッション作成直後はまだWiresharkコンテナの起動中で`ready`がfalseのことがあるため、
 // 少し待ってから何度か再確認する
@@ -72,7 +84,8 @@ export async function startPacketCapture(
       const label = labelKey ? labelsByContainer[labelKey] : undefined
       const labelQuery = label ? `?label=${encodeURIComponent(label)}` : ''
       // 共有（他人のラボ）の間は、collab-proxy経由で持ち主のセッションを開く
-      const url = shareCaptureUrl(normalizedPath, label) ?? `${CAPTURE_PROXY_BASE_URL}/capture/${encodeURIComponent(token)}${normalizedPath}${labelQuery}`
+      const shared = shareCaptureUrl(normalizedPath, label)
+      const url = shared ?? `${CAPTURE_PROXY_BASE_URL}/capture/_enter/${encodeURIComponent(await requestTicket(token))}${normalizedPath}${labelQuery}`
       const win = window.open(url, '_blank')
       watchTabAndCleanup(win, session.sessionId)
     }),

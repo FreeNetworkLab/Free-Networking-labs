@@ -60,3 +60,11 @@
     padding: 24px 20px;
   }
 }
+
+.login-form__remember {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted, inherit);
+}

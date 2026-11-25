@@ -1,97 +1,193 @@
 # Free-Networking-labs のコンテナ構成（設計：設計メモ（非公開））。
-# 使い方：backend/compose/init.sh を実行する（.env の作成、最初の管理者の作成、起動まで行う）。
+# 使い方：docker compose up -d だけで起動できる（.env も init.sh も要らない）。
+#   初回は、init-accounts が JWT の鍵と最初の管理者（fnladmin）を作り、パスワードをログに1回だけ出す：
+#     docker compose logs init-accounts
+#   控えたら、ログを消す（docker compose の rm サブコマンドで init-accounts を -s -f 付きで削除。パスワードがログに残るため）。
+#   init-images が、ノードのイメージ（FRR・スイッチ）を取得する（数分かかる）：docker compose logs -f init-images
+#   手元のコード（配布用tar.gz・ソース）を使う時は backend/compose/init.sh --local（.env を作り、起動まで行う）。
+#
+# このファイルは、公開したイメージ（fnl-web・fnl-proxy。ghcr.io）を使う。手元のコード（配布用tar.gz・ソース）を
+# bind mount で使う時は、compose.local.yaml を重ねる（init.sh --local が .env の COMPOSE_FILE に書く）。
 #
 # すべて network_mode: host。nginx の設定（backend/nginx/fnl.conf）が 127.0.0.1:8082〜8090 を指しているため、変えずに使う。
 # アカウントは clab-api-server のコンテナの /etc（名前付きボリューム fnl-etc）にだけ持ち、ホストには作らない。
 name: fnl
 
 x-proxy: &proxy
-  image: node:22-alpine
+  image: ${FNL_REGISTRY:-ghcr.io/freenetworklab}/fnl-proxy:${FNL_VERSION:-latest}
   network_mode: host
   restart: unless-stopped
   read_only: true
-  user: "${FNL_UID}:${FNL_GID}"
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
 
 services:
+  # 初回だけ動いて終わるサービス（restart しない）。上流と同じイメージで動かす：/etc のボリューム（fnl-etc）の初期値が、
+  # そのイメージの /etc になるため、アカウントの作成は、このイメージでなければならない。
+  init-accounts:
+    image: ghcr.io/srl-labs/clab-api-server/clab-api-server:${CLAB_API_SERVER_VERSION:-v0.10.0}
+    restart: "no"
+    environment:
+      JWT_SECRET: "${JWT_SECRET:-}"
+      FNL_ADMIN_USER: "${FNL_ADMIN_USER:-fnladmin}"
+    volumes:
+      - fnl-etc:/etc
+      - fnl-secrets:/fnl-secrets
+    # 上流の起動の仕組みは、実行するコマンドの全文をログに出す（パスワードが埋もれる）。通さずに、シェルを直接動かす
+    entrypoint: ["sh", "-eu", "-c"]
+    command:
+      - |
+        # 1. JWT の鍵：環境変数（.env）があればそれを使う。無ければ、一度だけ作ってボリュームに残す
+        if [ -z "$${JWT_SECRET:-}" ] && [ ! -s /fnl-secrets/jwt ]; then
+          tr -dc 'a-f0-9' < /dev/urandom | head -c 64 > /fnl-secrets/jwt
+          chmod 600 /fnl-secrets/jwt
+          echo "JWT の鍵を作りました"
+        fi
+        # 2. グループと最初の管理者。「admin と root 以外の管理者」がいなければ（イメージの clab_admins には admin と root が入っている）作る（すでに管理者がいるなら、何も作らない）
+        getent group clab_api >/dev/null || groupadd clab_api
+        getent group clab_admins >/dev/null || groupadd clab_admins
+        OTHERS=$$(getent group clab_admins | cut -d: -f4 | tr ',' '\n' | grep -vxE 'admin|root' || true)
+        if [ -z "$$OTHERS" ]; then
+          PW=$$(tr -dc 'A-HJ-NP-Za-km-z2-9' < /dev/urandom | head -c 16)
+          useradd -m -s /usr/sbin/nologin -G clab_api,clab_admins "$$FNL_ADMIN_USER"
+          echo "$$FNL_ADMIN_USER:$$PW" | chpasswd
+          echo "=============================================================="
+          echo "最初の管理者を作りました。パスワードは、今だけ表示します（控えてください）。"
+          echo "  ユーザー名: $$FNL_ADMIN_USER"
+          echo "  パスワード: $$PW"
+          echo "  控えたら、このログを消してください（docker compose の rm で init-accounts を削除）。"
+          echo "  控え忘れたら: docker compose exec clab-api-server passwd $$FNL_ADMIN_USER"
+          echo "=============================================================="
+        fi
+        # 3. イメージの既定のアカウント admin（パスワードが公開されている）は、ほかの管理者がいる状態で消す
+        if getent passwd admin >/dev/null && getent group clab_admins | cut -d: -f4 | tr ',' '\n' | grep -vxE 'admin|root' | grep -q .; then
+          userdel -r admin 2>/dev/null || userdel admin
+          echo "既定のアカウント admin を消しました"
+        fi
+
+  # 初回だけ動いて終わるサービス。ノードのイメージ（ラボが使う）を取得して、画面が使う名前のタグを付ける。取得済みなら飛ばす。
+  # 失敗しても、ほかのサービスには影響しない（再実行：docker compose up init-images）
+  init-images:
+    image: docker:27-cli
+    restart: "no"
+    environment:
+      FNL_REGISTRY: "${FNL_REGISTRY:-ghcr.io/freenetworklab}"
+      # frontend/src/types/lab.ts のタグと合わせる（tools/check-image-tags.sh が確かめる）
+      FNL_FRR_TAG: "${FNL_FRR_TAG:-4}"
+      FNL_L2_TAG: "${FNL_L2_TAG:-13}"
+      FNL_L3_TAG: "${FNL_L3_TAG:-10}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      - sh
+      - -u
+      - -c
+      - |
+        ok=1
+        get() {  # $$1=取得元  $$2=画面が使う名前
+          if docker image inspect "$$2" >/dev/null 2>&1; then echo "あります: $$2"; return; fi
+          echo "取得します: $$1"
+          if docker pull -q "$$1" >/dev/null && { [ "$$1" = "$$2" ] || docker tag "$$1" "$$2"; }; then echo "  → $$2"; else echo "  失敗: $$1" >&2; ok=0; fi
+        }
+        get "$$FNL_REGISTRY/fnl-frr:$$FNL_FRR_TAG" "fnl/frr:$$FNL_FRR_TAG"
+        get "$$FNL_REGISTRY/fnl-l2switch:$$FNL_L2_TAG" "fnl/l2switch:$$FNL_L2_TAG"
+        get "$$FNL_REGISTRY/fnl-l3switch:$$FNL_L3_TAG" "fnl/l3switch:$$FNL_L3_TAG"
+        get alpine:3.20 alpine:3.20
+        # Wireshark の画面（無いと、最初のキャプチャが45秒の制限で失敗する）
+        get ghcr.io/srl-labs/wireshark-vnc-docker:latest ghcr.io/srl-labs/wireshark-vnc-docker:latest
+        if [ "$$ok" = 1 ]; then echo "ノードのイメージの用意ができました"; else echo "一部の取得に失敗しました。ネットワークを確かめて、docker compose up init-images を再実行してください" >&2; exit 1; fi
+
   clab-api-server:
     # 上流の公式イメージ。root・Dockerソケット・ホストPIDが要る（今のホスト版と同じ権限）
     image: ghcr.io/srl-labs/clab-api-server/clab-api-server:${CLAB_API_SERVER_VERSION:-v0.10.0}
-    command: ["clab-api-server"]
+    # JWT の鍵：環境変数（.env）があればそれ、無ければ init-accounts が作った /fnl-secrets/jwt
+    command:
+      - sh
+      - -c
+      - '[ -n "$$JWT_SECRET" ] || export JWT_SECRET="$$(cat /fnl-secrets/jwt)"; exec clab-api-server'
+    depends_on:
+      init-accounts:
+        condition: service_completed_successfully
     network_mode: host
     pid: host
     privileged: true
     restart: unless-stopped
     environment:
       API_PORT: "8090"
-      JWT_SECRET: "${JWT_SECRET:?init.sh を実行して .env を作ってください}"
+      JWT_SECRET: "${JWT_SECRET:-}"
       JWT_EXPIRATION: "${JWT_EXPIRATION:-8h}"
       API_USER_GROUP: clab_api
       SUPERUSER_GROUP: clab_admins
-      CLAB_LABS_ROOT: "${FNL_LABS_ROOT}"
+      CLAB_LABS_ROOT: "${FNL_LABS_ROOT:-/var/lib/containerlab/labs}"
       LOG_LEVEL: info
     volumes:
       # アカウント（passwd/shadow/group）。/etc 全体をボリュームにする（1ファイルずつのbind mountはuseraddが失敗する）
       - fnl-etc:/etc
+      - fnl-secrets:/fnl-secrets:ro
       - fnl-api-tls:/root/.config/clab-api-server
       - /var/run/docker.sock:/var/run/docker.sock
       - /var/run/netns:/var/run/netns
       - /var/lib/docker/containers:/var/lib/docker/containers
       # ラボのルートは、ホストとコンテナで同じパスにする（containerlabがホストのパスでbind mountするため）
-      - ${FNL_LABS_ROOT}:${FNL_LABS_ROOT}
+      - ${FNL_LABS_ROOT:-/var/lib/containerlab/labs}:${FNL_LABS_ROOT:-/var/lib/containerlab/labs}
 
   ovs-helper:
-    # ラボのノードの設定の保存先を作る。ホストのsudoersの代わりに、権限を3つに絞ったコンテナで動かす。
+    # ラボのノードの設定の保存先を作る・ユーザーのラボを消す。ホストのsudoersの代わりに、権限を3つに絞ったコンテナで動かす。
     # Dockerソケットは渡さない。アカウントは読み取り専用（uid/gidを引くだけ）
     <<: *proxy
     user: root
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
-    working_dir: /app
+    working_dir: /app/ovs-helper
     command: ["node", "server.js"]
     environment:
       OVS_HELPER_NO_SUDO: "1"
-      OVS_HELPER_FRR_CONFIG_INIT_BIN: /app/frr-config-init.sh
-      FNL_LABS_ROOT: "${FNL_LABS_ROOT}"
+      OVS_HELPER_FRR_CONFIG_INIT_BIN: /app/ovs-helper/frr-config-init.sh
+      OVS_HELPER_PURGE_USER_LABS_BIN: /app/ovs-helper/purge-user-labs.sh
+      FNL_LABS_ROOT: "${FNL_LABS_ROOT:-/var/lib/containerlab/labs}"
       FNL_PASSWD_FILE: /accounts/passwd
     volumes:
-      - ../ovs-helper:/app:ro
       - fnl-etc:/accounts:ro
-      - ${FNL_LABS_ROOT}:${FNL_LABS_ROOT}
+      - ${FNL_LABS_ROOT:-/var/lib/containerlab/labs}:${FNL_LABS_ROOT:-/var/lib/containerlab/labs}
 
   console-proxy:
     <<: *proxy
-    working_dir: /app
+    working_dir: /app/console-proxy
     command: ["node", "server.js"]
-    volumes:
-      - ../console-proxy:/app:ro
 
   capture-proxy:
     <<: *proxy
-    working_dir: /app
-    command: ["node", "server.js"]
+    # 起動前に、自己署名証明書が無ければ /tls（名前付きボリューム）に作る
+    command: ["fnl-capture-entrypoint"]
+    environment:
+      CAPTURE_PROXY_TLS_CERT: /tls/cert.pem
+      CAPTURE_PROXY_TLS_KEY: /tls/key.pem
     volumes:
-      - ../capture-proxy:/app:ro
+      - fnl-capture-tls:/tls
 
   collab-proxy:
     <<: *proxy
-    working_dir: /app
+    working_dir: /app/collab-proxy
     command: ["node", "server.js"]
-    volumes:
-      - ../collab-proxy:/app:ro
 
   nginx:
-    image: nginx:1.27-alpine
+    # 画面と設定を焼いたイメージ。HTTPS の証明書が無ければ、起動時に /etc/nginx/ssl/fnl（名前付きボリューム）に作る
+    image: ${FNL_REGISTRY:-ghcr.io/freenetworklab}/fnl-web:${FNL_VERSION:-latest}
     network_mode: host
     restart: unless-stopped
     depends_on: [clab-api-server]
+    environment:
+      FNL_HOSTNAME: "${FNL_HOSTNAME:-fnl}"
     volumes:
-      - ../nginx/fnl.conf:/etc/nginx/conf.d/default.conf:ro
-      - ../nginx/certs:/etc/nginx/ssl/fnl:ro
-      - ../../frontend/dist:/var/www/free-networking-labs:ro
+      - fnl-web-tls:/etc/nginx/ssl/fnl
 
 volumes:
   fnl-etc:
     name: fnl-etc
   fnl-api-tls:
     name: fnl-api-tls
+  fnl-secrets:
+    name: fnl-secrets
+  fnl-web-tls:
+    name: fnl-web-tls
+  fnl-capture-tls:
+    name: fnl-capture-tls

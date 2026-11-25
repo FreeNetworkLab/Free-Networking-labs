@@ -10,11 +10,15 @@
 #   fnl/l3switch:7（2026-10-22）：VRRPのtrack（track N interface|ip route、vrrp N track）
 #   fnl/l3switch:8（2026-10-26）：起動時の表示を「FreeNetworkLab L3 switch」に
 #   fnl/l3switch:9（2026-10-26）：LLDPのシステム説明も同じ名前に
+#   fnl/l3switch:10（2026-11-18）：/licenses（ライセンスの明記。FRR・nftables・dhcp-helper の分も一覧に）。ビルドの文脈をリポジトリのルートに変更
 #
-#   docker build -t fnl/l2switch:12 backend/l2switch
-#   docker build -t fnl/l3switch:9 -f backend/l2switch/Dockerfile.l3 backend/l2switch
-ARG BASE=fnl/l2switch:12
+#   docker build -f backend/l2switch/Dockerfile -t fnl/l2switch:13 .                      ← リポジトリのルートで
+#   docker build -f backend/l2switch/Dockerfile.l3 -t fnl/l3switch:10 .
+ARG BASE=fnl/l2switch:13
 FROM ${BASE}
 RUN apk add --no-cache frr nftables dhcp-helper \
  && sed -i 's/^ospfd=no/ospfd=yes/; s/^bgpd=no/bgpd=yes/; s/^ripd=no/ripd=yes/; s/^vrrpd=no/vrrpd=yes/' /etc/frr/daemons
-COPY l3.py acl.py /usr/local/bin/
+COPY backend/l2switch/l3.py backend/l2switch/acl.py /usr/local/bin/
+# 入っているパッケージが増えたので、一覧を作り直す（LICENSE などは、土台のイメージにある）
+COPY backend/docker/collect-licenses.sh /tmp/collect-licenses.sh
+RUN sh /tmp/collect-licenses.sh /licenses && rm /tmp/collect-licenses.sh

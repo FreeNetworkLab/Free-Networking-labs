@@ -1,5 +1,5 @@
 # タグ（v0.1.0 など）を push すると、ノードのイメージを GHCR に公開し、配布用の tar.gz を GitHub Release に載せる。
-# 初回だけ、GHCR のパッケージ（fnl-frr・fnl-l2switch・fnl-l3switch）を Public にする（Packages の設定画面）。
+# 初回だけ、GHCR のパッケージ（fnl-frr・fnl-l2switch・fnl-l3switch・fnl-web・fnl-proxy）を Public にする（Packages の設定画面）。
 name: Release
 
 on:
@@ -37,7 +37,8 @@ jobs:
       - name: ルーターのイメージ
         uses: docker/build-push-action@v6
         with:
-          context: backend/frr-router
+          context: .
+          file: backend/frr-router/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.registry }}/fnl-frr:${{ steps.meta.outputs.frr }}
           labels: |
@@ -47,7 +48,8 @@ jobs:
       - name: L2スイッチのイメージ
         uses: docker/build-push-action@v6
         with:
-          context: backend/l2switch
+          context: .
+          file: backend/l2switch/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.registry }}/fnl-l2switch:${{ steps.meta.outputs.l2 }}
           labels: |
@@ -57,7 +59,7 @@ jobs:
       - name: L3スイッチのイメージ
         uses: docker/build-push-action@v6
         with:
-          context: backend/l2switch
+          context: .
           file: backend/l2switch/Dockerfile.l3
           build-args: BASE=${{ steps.meta.outputs.registry }}/fnl-l2switch:${{ steps.meta.outputs.l2 }}
           push: true
@@ -66,8 +68,39 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.licenses=GPL-2.0-or-later AND GPL-2.0-only AND ISC AND MIT
             org.opencontainers.image.description=Free-Networking-labs のノードのイメージ（ソースとライセンスは source のリポジトリを参照）
+      - name: 画面と入口のイメージ（fnl-web）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/nginx/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.registry }}/fnl-web:${{ steps.meta.outputs.ver }}
+            ${{ steps.meta.outputs.registry }}/fnl-web:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.description=Free-Networking-labs の画面と入口（nginx）
+      - name: プロキシのイメージ（fnl-proxy）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile.proxy
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.registry }}/fnl-proxy:${{ steps.meta.outputs.ver }}
+            ${{ steps.meta.outputs.registry }}/fnl-proxy:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.description=Free-Networking-labs のプロキシ（console・capture・collab・ovs-helper）
       - name: 配布用の tar.gz を作る
         run: bash tools/make-dist.sh "${{ steps.meta.outputs.ver }}" "${{ steps.meta.outputs.registry }}" dist-out
+      - name: compose だけで入れるためのファイルを作る（版を固定する）
+        run: |
+          sed "s|FNL_VERSION:-latest|FNL_VERSION:-${{ steps.meta.outputs.ver }}|g" backend/compose/compose.yaml > dist-out/compose.yaml
+          cp backend/edgeshark/docker-compose.yaml dist-out/edgeshark.yaml
+          grep -c "FNL_VERSION:-${{ steps.meta.outputs.ver }}" dist-out/compose.yaml
       - name: Release に載せる
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

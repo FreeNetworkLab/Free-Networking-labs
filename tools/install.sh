@@ -151,9 +151,10 @@ if [ "$SKIP_IMAGES" = 1 ]; then echo "  --skip-images のため飛ばします�
       run "${DOCKER[@]}" tag "$remote" "$t"
     done
   else
-    run "${DOCKER[@]}" build -t "$FRR" "$REPO/backend/frr-router"
-    run "${DOCKER[@]}" build -t "$L2" "$REPO/backend/l2switch"
-    run "${DOCKER[@]}" build -t "$L3" -f "$REPO/backend/l2switch/Dockerfile.l3" "$REPO/backend/l2switch"
+    # ビルドの文脈はリポジトリのルート（/licenses に LICENSE などを入れるため）
+    run "${DOCKER[@]}" build -t "$FRR" -f "$REPO/backend/frr-router/Dockerfile" "$REPO"
+    run "${DOCKER[@]}" build -t "$L2" -f "$REPO/backend/l2switch/Dockerfile" "$REPO"
+    run "${DOCKER[@]}" build -t "$L3" --build-arg "BASE=$L2" -f "$REPO/backend/l2switch/Dockerfile.l3" "$REPO"
   fi
   run "${DOCKER[@]}" pull alpine:3.20
   echo "  Wireshark のイメージは、先に取得しておく（無いと最初のキャプチャが45秒の制限で失敗する）"
@@ -200,11 +201,11 @@ if [ "$LEGACY" = 0 ]; then
   fi
 
   step "7. 起動（clab-api-server・ovs-helper・プロキシ・nginx。最初の管理者もここで作ります）"
-  sh_run "bash '$REPO/backend/compose/init.sh'"
+  sh_run "bash '$REPO/backend/compose/init.sh' --local"
 
   step "8. 動作の確認"
   if [ "$DRY" = 1 ]; then echo "  （--dry-run のため確認は飛ばします）"; else
-    "${DOCKER[@]}" compose -f "$REPO/backend/compose/compose.yaml" ps --format 'table {{.Service}}\t{{.State}}' || true
+    "${DOCKER[@]}" compose --project-directory "$REPO/backend/compose" ps --format 'table {{.Service}}\t{{.State}}' || true
     sleep 3
     curl -sk -m 8 -o /dev/null -w '  clab-api-server /health: HTTP %{http_code}\n' https://localhost:8090/health || true
     curl -sk -m 8 -o /dev/null -w '  画面 https://localhost/: HTTP %{http_code}\n' https://localhost/ || true

@@ -1,0 +1,30 @@
+# プロキシ4つ（console・capture・collab・ovs-helper）を1つにまとめたイメージ（fnl-proxy）。
+# サービスごとに、起動のコマンドだけを変える（compose.yaml）。ビルドの文脈はリポジトリのルート：
+#   docker build -f backend/Dockerfile.proxy -t fnl-proxy .
+FROM node:22-alpine
+LABEL org.opencontainers.image.title="fnl-proxy" \
+      org.opencontainers.image.description="Free-Networking-labs のプロキシ（console・capture・collab・ovs-helper）" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.source="https://github.com/FreeNetworkLab/Free-Networking-labs" \
+      org.opencontainers.image.documentation="含まれるソフトのライセンスは、イメージの /licenses を参照"
+RUN apk add --no-cache openssl
+WORKDIR /app
+COPY backend/console-proxy/package.json backend/console-proxy/package-lock.json console-proxy/
+COPY backend/capture-proxy/package.json backend/capture-proxy/package-lock.json capture-proxy/
+RUN (cd console-proxy && npm ci --omit=dev --no-audit --no-fund) && (cd capture-proxy && npm ci --omit=dev --no-audit --no-fund)
+COPY backend/console-proxy/server.js console-proxy/
+COPY backend/capture-proxy/server.js capture-proxy/
+COPY backend/collab-proxy/server.js backend/collab-proxy/package.json collab-proxy/
+COPY backend/ovs-helper/server.js backend/ovs-helper/package.json backend/ovs-helper/frr-config-init.sh backend/ovs-helper/purge-user-labs.sh ovs-helper/
+COPY backend/docker/capture-entrypoint.sh /usr/local/bin/fnl-capture-entrypoint
+# ライセンスの明記：このリポジトリの LICENSE、外部ソフトの一覧、GPL-2.0（busybox など）、npm の依存の LICENSE、Alpine のパッケージ一覧
+COPY LICENSE THIRD-PARTY-LICENSES.md /licenses/
+COPY licenses/GPL-2.0.txt /licenses/
+COPY backend/docker/collect-licenses.sh backend/docker/collect-npm-licenses.sh /tmp/
+RUN sh /tmp/collect-licenses.sh /licenses \
+ && (cd console-proxy && sh /tmp/collect-npm-licenses.sh /licenses/npm-console-proxy) \
+ && (cd capture-proxy && sh /tmp/collect-npm-licenses.sh /licenses/npm-capture-proxy) \
+ && rm /tmp/collect-licenses.sh /tmp/collect-npm-licenses.sh
+# capture-proxy の自己署名証明書の置き場（名前付きボリュームにすると、作り直しても同じ証明書を使う）
+RUN chmod +x ovs-helper/*.sh /usr/local/bin/fnl-capture-entrypoint && mkdir /tls && chown node:node /tls
+USER node

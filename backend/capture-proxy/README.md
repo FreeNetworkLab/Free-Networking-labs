@@ -16,28 +16,32 @@ clab-api-serverの`AuthMiddleware`はヘッダー以外の手段を一切持た�
 
 ## プロトコル
 
-`console-proxy`（最初の1メッセージでトークンを送る方式）と違い、こちらは
-**トークンをURLのパスに埋め込む**方式にしている。noVNCは複数のHTML/JS/CSSファイルを
-素のGETで読みに行く通常のWebアプリであり、「最初の1メッセージでトークンを送る」ような
-ハンドシェイクをフックできないため：
+`console-proxy`（最初の1メッセージでトークンを送る方式）と違い、こちらは**使い切りのチケット＋Cookie**で認証する
+（2026-11-18に変更。以前は、JWT を URL のパスに埋め込んでいて、nginx のアクセスログやブラウザの履歴に、
+8時間有効なトークンが残った）。noVNCは複数のHTML/JS/CSSファイルを素のGETで読みに行く通常のWebアプリであり、
+「最初の1メッセージでトークンを送る」ようなハンドシェイクをフックできないため、Cookie を使う：
 
-```
-https://<capture-proxy>/capture/<jwt>/<clab-api-serverのパス（先頭/から）>
-```
-
-を開くと、`<clab-api-serverのパス>`部分をそのまま
+1. `POST /capture/_ticket`（`Authorization: Bearer <jwt>`）→ `{"ticket":"…"}`。有効なトークンだけがもらえる。チケットは30秒で失効し、1回しか使えない。
+2. 新しいタブで `/capture/_enter/<ticket>/<clab-api-serverのパス（先頭/から）>?label=…` を開く。
+   proxy がチケットを使い切りにして、`fnl_capture` Cookie（`HttpOnly; Secure; SameSite=Strict; Path=/capture/`）を発行し、
+   `/capture/s/<clab-api-serverのパス>` へ 302 でリダイレクトする。Cookie の値は、proxy の中の対応表の鍵で、JWT そのものではない（有効期間は `CAPTURE_LOGIN_HOURS`、既定8時間）。
+3. 以後は `/capture/s/<clab-api-serverのパス>` を Cookie で認証し、`<clab-api-serverのパス>`部分をそのまま
 
 ```
 https://<clab-api-server><そのパス>
 ```
 
-にAuthorizationヘッダー付きで転送する（WebSocketアップグレードも同じパスパターンで中継、
+に Authorization ヘッダー付きで転送する（WebSocketアップグレードも同じパスパターンで中継、
 RFBプロトコルの生バイナリフレームをそのまま双方向に流すだけでJSON等の解釈はしない）。
+中継するのは Wireshark の noVNC（`/api/v1/capture/wireshark-vnc-sessions/<id>/vnc/...`）だけ。
+
+テスト：`npm test`（`server.test.js`。擬似の上流サーバーを立てて、チケットの使い切り・Cookie の属性・Cookie なしの拒否・
+WebSocket・ログに JWT が出ないことを確かめる）。
 
 `GET /capture/wireshark-vnc-sessions/{sessionId}/ready`が返す`url`は
 `/api/v1/capture/wireshark-vnc-sessions/<sessionId>/vnc/...`という**完全なパス**
 （2026-10-08実機確認。`/vnc/{proxyPath}`配下の相対パスではなかった）なので、
-フロントエンドはこの`url`をそのまま`<clab-api-serverのパス>`部分に埋め込むだけでよい。
+フロントエンドはこの`url`をそのまま`<clab-api-serverのパス>`部分に埋め込むだけでよい（`/capture/_enter/<ticket>` の後ろ）。
 このプロキシ自身はパスを組み立て直さず、渡されたパスをそのまま右から左に流すだけ。
 
 **実機確認済み（2026-10-08）**：noVNCのHTML/JS/CSS資産は想定通りこのパスプレフィックス越しに

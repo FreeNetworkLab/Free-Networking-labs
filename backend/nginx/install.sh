@@ -14,6 +14,8 @@ sudo install -d -m 0750 /etc/nginx/ssl/fnl
 sudo install -m 0644 "$HERE/certs/cert.pem" /etc/nginx/ssl/fnl/cert.pem
 sudo install -m 0600 "$HERE/certs/key.pem"  /etc/nginx/ssl/fnl/key.pem
 sudo install -m 0644 "$HERE/fnl.conf" /etc/nginx/conf.d/fnl.conf
+# 管理APIの接続元の一覧は、管理者が編集するので、すでにあれば上書きしない
+[ -f /etc/nginx/fnl-admin-allow.conf ] || sudo install -m 0644 "$HERE/admin-allow.conf" /etc/nginx/fnl-admin-allow.conf
 sudo rm -f /etc/nginx/sites-enabled/default      # 80番の既定サイトと競合するため
 # 静的ファイルの置き場所は一度だけ自分の所有にして、以後のデプロイはsudo不要にする
 sudo install -d -o "$OWNER" -g "$OWNER" /var/www/free-networking-labs

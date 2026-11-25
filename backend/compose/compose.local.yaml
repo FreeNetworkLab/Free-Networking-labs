@@ -1,0 +1,47 @@
+# 手元のコード（配布用 tar.gz・ソース）を、bind mount でそのまま使う上書き（非推奨。ネットワークの制限で ghcr.io に
+# つながらない環境や、コードを直しながら試す時のため）。compose.yaml に重ねて使う。
+# init.sh --local が、.env に COMPOSE_FILE=compose.yaml:compose.local.yaml を書く（docker compose が自動で読む）。
+# 前提：画面のビルド（frontend/dist）、証明書（backend/nginx/certs・backend/capture-proxy/certs）。tools/install.sh が用意する。
+x-local-proxy: &local-proxy
+  image: node:22-alpine
+  user: "${FNL_UID}:${FNL_GID}"
+  working_dir: /app
+  command: !override ["node", "server.js"]
+
+services:
+  ovs-helper:
+    <<: *local-proxy
+    user: root
+    environment:
+      OVS_HELPER_FRR_CONFIG_INIT_BIN: /app/frr-config-init.sh
+      OVS_HELPER_PURGE_USER_LABS_BIN: /app/purge-user-labs.sh
+    volumes: !override
+      - ../ovs-helper:/app:ro
+      - fnl-etc:/accounts:ro
+      - ${FNL_LABS_ROOT}:${FNL_LABS_ROOT}
+
+  console-proxy:
+    <<: *local-proxy
+    volumes: !override
+      - ../console-proxy:/app:ro
+
+  capture-proxy:
+    <<: *local-proxy
+    environment:
+      CAPTURE_PROXY_TLS_CERT: /app/certs/cert.pem
+      CAPTURE_PROXY_TLS_KEY: /app/certs/key.pem
+    volumes: !override
+      - ../capture-proxy:/app:ro
+
+  collab-proxy:
+    <<: *local-proxy
+    volumes: !override
+      - ../collab-proxy:/app:ro
+
+  nginx:
+    image: nginx:1.27-alpine
+    volumes: !override
+      - ../nginx/fnl.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../nginx/admin-allow.conf:/etc/nginx/fnl-admin-allow.conf:ro
+      - ../nginx/certs:/etc/nginx/ssl/fnl:ro
+      - ../../frontend/dist:/var/www/free-networking-labs:ro

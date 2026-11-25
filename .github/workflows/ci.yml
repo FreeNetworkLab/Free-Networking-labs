@@ -38,6 +38,20 @@ jobs:
       - name: 本番ビルド
         run: npm run build
 
+  compose:
+    name: compose（設定の検証・イメージのタグの一致）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 画面とcomposeのイメージのタグがそろっているか
+        run: bash tools/check-image-tags.sh
+      - name: compose.yaml（イメージ版）の検証（.env なし）
+        run: docker compose --env-file /dev/null -f backend/compose/compose.yaml config -q
+      - name: compose.yaml + compose.local.yaml（手元のコード版）の検証
+        run: |
+          printf 'FNL_UID=1000\nFNL_GID=1000\nJWT_SECRET=x\n' > /tmp/ci.env
+          docker compose --env-file /tmp/ci.env -f backend/compose/compose.yaml -f backend/compose/compose.local.yaml config -q
+
   swcli:
     name: swcli（L2・L3スイッチのCLI）
     runs-on: ubuntu-latest
@@ -70,3 +84,6 @@ jobs:
       - name: collab-proxyのテスト
         run: node --test
         working-directory: backend/collab-proxy
+      - name: capture-proxyのテスト（チケット＋Cookie 認証）
+        run: npm ci && node --test
+        working-directory: backend/capture-proxy

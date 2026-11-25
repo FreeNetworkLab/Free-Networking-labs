@@ -9,17 +9,17 @@
 //   個々のアセット読み込み・WebSocket接続は、カスタムヘッダーを一切設定できない。
 //   → ブラウザからは直接開けないため、この中継プロキシがヘッダーを付けて代わりに取得する。
 //
-// プロトコル（console-proxyと違い、こちらはトークンをURLのパスに埋め込む方式にしている。
-// 理由：noVNCは複数のHTML/JS/CSSファイルを素のGETで読みに行く通常のWebアプリであり、
-// 「最初の1メッセージでトークンを送る」ようなハンドシェイクをフックできないため）：
-//   ブラウザで `https://<proxy>/capture/<jwt>/<clab-api-serverのパス（先頭/から）>` を開くと、
-//   このプロキシが `<clab-api-serverのパス>` 部分をそのまま
-//   `https://<clab-api-server><そのパス>` にAuthorizationヘッダー付きで転送する
-//   （WebSocketアップグレードも同じパスパターンで中継）。
-//   `GET .../ready`が返す`url`は`/api/v1/capture/wireshark-vnc-sessions/<sessionId>/vnc/...`
-//   という**フルパス**なので（2026-10-08実機確認：`vnc/{proxyPath}`配下の相対パスではなかった）、
-//   このプロキシは`/vnc`以下を自分で組み立てたりせず、渡されたパスをそのまま右から左に流すだけにする
-//   （sessionIdをこのプロキシ自身のURLパスに含めないのもこのため。既にrest側に入っている）
+// プロトコル（2026-11-18に変更。以前は JWT を URL のパスに埋め込んでいたため、nginx のアクセスログやブラウザの履歴に、
+// 8時間有効なトークンが残っていた）。JWT は URL に出さず、「チケット＋Cookie」で渡す：
+//   1. 画面が `POST /capture/_ticket`（Authorization ヘッダーつき）で使い切りのチケット（30秒で失効）をもらう
+//   2. 新しいタブで `/capture/_enter/<チケット>/<clab-api-serverのパス>` を開く。proxy がチケットを使い切りにし、
+//      HttpOnly・Secure・SameSite=Strict の Cookie（proxy の中の対応表の鍵。JWT そのものではない）を発行して、
+//      `/capture/s/<clab-api-serverのパス>` へリダイレクトする
+//   3. 以後（noVNC の素の GET も WebSocket も）は Cookie で認証し、proxy が JWT を Authorization ヘッダーにして上流へ流す
+// 上流の`GET /api/v1/capture/wireshark-vnc-sessions/<id>/vnc/...`（noVNCのHTML/JS/CSS資産＋VNC用WebSocket）は、
+// `Authorization: Bearer <jwt>`ヘッダーでしか認証できないが、ブラウザの新しいタブは、カスタムヘッダーを付けられないため、
+// この方式にしている。`GET .../ready`が返す`url`は`/api/v1/capture/wireshark-vnc-sessions/<sessionId>/vnc/...`という
+// **フルパス**なので（2026-10-08実機確認）、このプロキシは渡されたパスをそのまま右から左に流すだけにする。
 //
 // このプロキシ自身を2026-10-09にHTTPS化した。理由：noVNC（jlesage/baseimage-gui）には
 // ブラウザのClipboard APIを使った「ホストクリップボード自動同期」機能があるが、
@@ -32,6 +32,7 @@
 import https from 'node:https'
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer, WebSocket } from 'ws'
 
@@ -46,31 +47,117 @@ const TLS_KEY_PATH = process.env.CAPTURE_PROXY_TLS_KEY ?? path.join(__dirname, '
 const upstreamOrigin = new URL(CLAB_API_BASE_URL)
 const upstreamIsTls = upstreamOrigin.protocol === 'https:'
 
-// `/capture/<token>/<clab-api-serverのパス...>?label=<表示ラベル>` を分解する。restはそのまま
+// ---- チケットと Cookie ----
+const TICKET_TTL_MS = 30 * 1000
+const LOGIN_TTL_MS = Number(process.env.CAPTURE_LOGIN_HOURS ?? 8) * 3600 * 1000
+const COOKIE_NAME = 'fnl_capture'
+const MAX_ENTRIES = 5000 // 認証済みの利用者でも、対応表を際限なく増やさない
+const tickets = new Map() // チケット → { token, expires }
+const logins = new Map() // Cookie の値 → { token, expires }
+const randomId = () => crypto.randomBytes(24).toString('base64url')
+setInterval(() => {
+  const now = Date.now()
+  for (const [k, v] of tickets) if (v.expires < now) tickets.delete(k)
+  for (const [k, v] of logins) if (v.expires < now) logins.delete(k)
+}, 60 * 1000).unref()
+
+// 中継するのはWiresharkのnoVNC（/api/v1/capture/wireshark-vnc-sessions/<id>/vnc/...）だけ。窓口を広げない（2026-10-15）
+const VNC_PATH = /^\/api\/v1\/capture\/wireshark-vnc-sessions\/[^/]+\/vnc(\/|$)/
+
+function loginTokenOf(req) {
+  const cookie = String(req.headers.cookie ?? '')
+  const m = new RegExp(`(?:^|;\\s*)${COOKIE_NAME}=([A-Za-z0-9_-]+)`).exec(cookie)
+  const entry = m ? logins.get(m[1]) : null
+  return entry && entry.expires > Date.now() ? entry.token : null
+}
+
+// 有効なトークンなら GET /api/v1/labs は200を返す（ovs-helper の verifyTokenOnly と同じ）
+function verifyToken(token) {
+  return new Promise((resolve) => {
+    const r = https.request(
+      {
+        hostname: upstreamOrigin.hostname,
+        port: upstreamOrigin.port || (upstreamIsTls ? 443 : 80),
+        path: '/api/v1/labs',
+        method: 'GET',
+        headers: { authorization: `Bearer ${token}` },
+        rejectUnauthorized: false,
+      },
+      (res) => {
+        res.resume()
+        resolve(res.statusCode === 200)
+      },
+    )
+    r.on('error', () => resolve(false))
+    r.end()
+  })
+}
+
+function sendText(res, status, text, headers = {}) {
+  res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', ...headers })
+  res.end(text)
+}
+
+// POST /capture/_ticket：Authorization: Bearer <jwt> で、使い切りのチケットをもらう
+async function handleTicket(req, res) {
+  const auth = String(req.headers.authorization ?? '')
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null
+  if (!token) return sendText(res, 401, 'Authorization: Bearer <token> が必要です')
+  if (!(await verifyToken(token))) return sendText(res, 401, '認証に失敗しました')
+  if (tickets.size >= MAX_ENTRIES) return sendText(res, 429, 'しばらくしてからやり直してください')
+  const ticket = randomId()
+  tickets.set(ticket, { token, expires: Date.now() + TICKET_TTL_MS })
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+  res.end(JSON.stringify({ ticket }))
+}
+
+// GET /capture/_enter/<チケット>/<パス>?...：チケットを使い切りにして Cookie を発行し、/capture/s/<パス> へ
+function handleEnter(req, res) {
+  const raw = req.url ?? ''
+  const [pathPart, queryRaw] = raw.split('?')
+  const m = /^\/capture\/_enter\/([A-Za-z0-9_-]+)(\/.*)$/.exec(pathPart)
+  if (!m || !VNC_PATH.test(m[2])) return sendText(res, 404, 'not found')
+  const t = tickets.get(m[1])
+  tickets.delete(m[1]) // 使い切り（成功・失敗にかかわらず）
+  if (!t || t.expires < Date.now()) return sendText(res, 410, 'このリンクは、期限が切れたか、すでに使われています。画面からキャプチャをやり直してください')
+  if (logins.size >= MAX_ENTRIES) return sendText(res, 429, 'しばらくしてからやり直してください')
+  const loginId = randomId()
+  logins.set(loginId, { token: t.token, expires: Date.now() + LOGIN_TTL_MS })
+  res.writeHead(302, {
+    'Set-Cookie': `${COOKIE_NAME}=${loginId}; Path=/capture/; HttpOnly; Secure; SameSite=Strict; Max-Age=${Math.floor(LOGIN_TTL_MS / 1000)}`,
+    Location: `/capture/s${m[2]}${queryRaw ? `?${queryRaw}` : ''}`,
+    'Cache-Control': 'no-store',
+  })
+  res.end()
+}
+
+// `/capture/s/<clab-api-serverのパス...>?label=<表示ラベル>` を分解する（認証は Cookie）。restはそのまま
 // clab-api-server側のパス（`/api/v1/...`）として使うので、ここでは組み立て直さない。
 // `label`はこのプロキシだけで使う（上流には渡さない。タブの見分けづらさ対策、2026-10-08追加）
-function parseCapturePath(rawUrl) {
+// 戻り値：null＝対象外のパス／{ denied: true }＝Cookie が無い・失効／それ以外＝分解した結果
+function parseCapturePath(rawUrl, req) {
   const [pathPart, queryRaw] = rawUrl.split('?')
-  const m = /^\/capture\/([^/]+)(\/.*)?$/.exec(pathPart)
-  if (!m) return null
-  // 中継するのはWiresharkのnoVNC（/api/v1/capture/wireshark-vnc-sessions/<id>/vnc/...）だけ。
-  // 以前は任意のパスを中継していた（トークンを持つ本人の権限を超えはしないが、窓口を広げない、2026-10-15）
-  if (!/^\/api\/v1\/capture\/wireshark-vnc-sessions\/[^/]+\/vnc(\/|$)/.test(m[2] ?? '')) return null
+  const m = /^\/capture\/s(\/.*)$/.exec(pathPart)
+  if (!m || !VNC_PATH.test(m[1])) return null
+  const token = loginTokenOf(req)
+  if (!token) return { denied: true }
   const params = new URLSearchParams(queryRaw ?? '')
   const label = params.get('label')
   params.delete('label')
   const query = params.toString()
   return {
-    token: m[1],
-    rest: m[2] || '/',
+    token,
+    rest: m[1],
     query: query ? `?${query}` : '',
     label,
   }
 }
 
-// ログに出すURL。パスに埋め込んだトークン（JWT）を伏せる（journalに24時間有効なトークンが残っていた、2026-10-15）
+// ログに出すURL。チケット（使い切りだが、念のため）と、古い形式（JWT がパスに入っている）の最初の区間を伏せる
 function redactUrl(rawUrl) {
-  return String(rawUrl ?? '').replace(/^\/capture\/[^/?]+/, '/capture/<token>')
+  return String(rawUrl ?? '')
+    .replace(/^\/capture\/_enter\/[^/?]+/, '/capture/_enter/<ticket>')
+    .replace(/^\/capture\/(?!s\/|_ticket|_enter\/)[^/?]+/, '/capture/<redacted>')
 }
 
 function upstreamPathFor(parsed) {
@@ -151,11 +238,18 @@ function closeSession(id) {
 const tlsOptions = { cert: fs.readFileSync(TLS_CERT_PATH), key: fs.readFileSync(TLS_KEY_PATH) }
 
 const server = https.createServer(tlsOptions, (req, res) => {
-  const parsed = parseCapturePath(req.url ?? '')
-  if (!parsed) {
-    console.log(`[http] 404 no-match: ${req.method} ${redactUrl(req.url)}`)
-    res.writeHead(404, { 'Content-Type': 'text/plain' })
-    res.end('not found: expected /capture/<token>/<path>')
+  if (req.method === 'POST' && req.url === '/capture/_ticket') {
+    handleTicket(req, res).catch(() => sendText(res, 500, 'error'))
+    return
+  }
+  if (req.method === 'GET' && (req.url ?? '').startsWith('/capture/_enter/')) {
+    handleEnter(req, res)
+    return
+  }
+  const parsed = parseCapturePath(req.url ?? '', req)
+  if (!parsed || parsed.denied) {
+    console.log(`[http] ${parsed ? 401 : 404} ${parsed ? 'no-cookie' : 'no-match'}: ${req.method} ${redactUrl(req.url)}`)
+    sendText(res, parsed ? 401 : 404, parsed ? 'ログインが切れました。画面からキャプチャをやり直してください' : 'not found')
     return
   }
   trackSession(parsed)
@@ -213,9 +307,9 @@ const server = https.createServer(tlsOptions, (req, res) => {
 const wss = new WebSocketServer({ noServer: true })
 
 server.on('upgrade', (req, socket, head) => {
-  const parsed = parseCapturePath(req.url ?? '')
-  if (!parsed) {
-    console.log(`[ws] reject no-match: ${redactUrl(req.url)}`)
+  const parsed = parseCapturePath(req.url ?? '', req)
+  if (!parsed || parsed.denied) {
+    console.log(`[ws] reject ${parsed ? 'no-cookie' : 'no-match'}: ${redactUrl(req.url)}`)
     socket.destroy()
     return
   }
@@ -276,5 +370,5 @@ server.on('upgrade', (req, socket, head) => {
 })
 
 server.listen(PROXY_PORT, LISTEN_HOST, () => {
-  console.log(`capture-proxy listening on https://localhost:${PROXY_PORT}/capture/<token>/... (upstream: ${CLAB_API_BASE_URL})`)
+  console.log(`capture-proxy listening on https://localhost:${PROXY_PORT}/capture/_ticket, /capture/_enter/<ticket>/..., /capture/s/... (upstream: ${CLAB_API_BASE_URL})`)
 })

@@ -12,13 +12,16 @@
 #   fnl/l2switch:10（2026-10-21）：プラグインの拡張点を追加（ACLモード。L2スイッチの動きは変わらない）
 #   fnl/l2switch:11（2026-10-26）：起動時の表示を「FreeNetworkLab L2(L3) switch」に
 #   fnl/l2switch:12（2026-10-26）：LLDPのシステム説明も同じ名前に
+#   fnl/l2switch:13（2026-11-18）：/licenses（ライセンスの明記）を追加。ビルドの文脈をリポジトリのルートに変更
+#
+#   docker build -f backend/l2switch/Dockerfile -t fnl/l2switch:13 .      ← リポジトリのルートで
 
 # mstpdはAlpineのパッケージに無いのでソースから作る。コンテナの中で動かすための改修はmstpd/fnl.patch
 FROM alpine:3.22 AS mstpd
 ARG MSTPD_COMMIT=2e747d80ad48ffd32ec2f918b48a7c7a3916253b
 RUN apk add --no-cache build-base autoconf automake libtool linux-headers bsd-compat-headers pkgconf bash libmnl-dev git
 RUN git clone https://github.com/mstpd/mstpd.git /src && git -C /src checkout "$MSTPD_COMMIT"
-COPY mstpd/fnl.patch /src/fnl.patch
+COPY backend/l2switch/mstpd/fnl.patch /src/fnl.patch
 WORKDIR /src
 RUN git apply fnl.patch \
  && ./autogen.sh && ./configure --prefix=/usr --sysconfdir=/etc --sbindir=/usr/sbin \
@@ -27,7 +30,13 @@ RUN git apply fnl.patch \
 FROM alpine:3.22
 RUN apk add --no-cache iproute2 iproute2-tc python3 libmnl lldpd
 COPY --from=mstpd /out/usr/sbin/mstpd /out/usr/sbin/mstpctl /usr/sbin/
-COPY swcli.py /usr/local/bin/swcli
-COPY fnl-switch-start /usr/local/bin/fnl-switch-start
+COPY backend/l2switch/swcli.py /usr/local/bin/swcli
+COPY backend/l2switch/fnl-switch-start /usr/local/bin/fnl-switch-start
 RUN chmod 755 /usr/local/bin/swcli /usr/local/bin/fnl-switch-start
+# ライセンスの明記（2026-11-18〜）：このリポジトリの LICENSE、外部ソフトの一覧、GPL-2.0、入っている Alpine のパッケージの一覧
+COPY LICENSE THIRD-PARTY-LICENSES.md licenses/GPL-2.0.txt /licenses/
+COPY backend/docker/collect-licenses.sh /tmp/collect-licenses.sh
+RUN sh /tmp/collect-licenses.sh /licenses && rm /tmp/collect-licenses.sh
+# mstpd（GPL-2.0）のライセンスファイル（ソースから作ったため、ここで取り出す）
+COPY --from=mstpd /src/LICENSE /licenses/mstpd-LICENSE
 CMD ["/usr/local/bin/fnl-switch-start"]

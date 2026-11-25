@@ -41,3 +41,10 @@ export function ensureFrrConfig(labName: string, routerName: string): Promise<vo
 export function ensureSwitchConfig(labName: string, switchName: string): Promise<void> {
   return postToHelper('/switch-config', { labName, switchName })
 }
+
+// 管理者が、ユーザーのラボのフォルダ（labs/<ユーザー名>/）をまるごと消す（2026-11-18）。ユーザーを消す「前」に呼ぶ。
+// 止まっているラボのフォルダは、APIでは消せない。残すと、同じuidの新しいユーザーに見えるおそれがある。
+// コンテナ方式のみ（従来の方式は501）。管理者でなければ403
+export function purgeUserLabs(username: string): Promise<void> {
+  return postToHelper('/purge-user-labs', { username })
+}

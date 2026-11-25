@@ -9,10 +9,11 @@ export default function LoginForm() {
   const error = useAuthStore((s) => s.error)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [remember, setRemember] = useState(false)
 
   const onSubmit = (event: React.FormEvent) => {
     event.preventDefault()
-    login(username, password).catch(() => {
+    login(username, password, remember).catch(() => {
       // エラーメッセージは authStore 側の state に入るのでここでは握りつぶす
     })
   }
@@ -39,6 +40,10 @@ export default function LoginForm() {
             autoComplete="current-password"
             required
           />
+        </label>
+        <label className="login-form__remember">
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+          このブラウザでログインを保つ
         </label>
         {error && <p className="login-form__error">{error}</p>}
         <button className="btn-primary" type="submit" disabled={isAuthenticating}>

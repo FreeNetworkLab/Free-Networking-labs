@@ -58,8 +58,26 @@ CML Free にある次の制約を持たないことを目指しています。
 
 Ubuntu 24.04 のサーバーで、管理者のアカウント（`sudo` が使える人）が実行します。
 
-**配布版（おすすめ）**：[Releases](https://github.com/FreeNetworkLab/Free-Networking-labs/releases) の `fnl-<バージョン>.tar.gz` を使います。画面はビルド済みで、ノードのイメージは
-ダウンロードするだけなので、数分で終わります。
+**compose だけで入れる（おすすめ）**：必要なのは Docker だけです。画面もプロキシも、公開したイメージ（`ghcr.io/freenetworklab/`）に入っています。
+[Releases](https://github.com/FreeNetworkLab/Free-Networking-labs/releases) の `compose.yaml` と `edgeshark.yaml` を使います。
+
+```sh
+curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker "$USER"   # Docker が無い場合だけ（入れたあと、入り直す）
+mkdir fnl && cd fnl
+curl -fsSLO https://github.com/FreeNetworkLab/Free-Networking-labs/releases/latest/download/compose.yaml
+curl -fsSLO https://github.com/FreeNetworkLab/Free-Networking-labs/releases/latest/download/edgeshark.yaml
+docker compose -f edgeshark.yaml up -d    # キャプチャの裏方
+docker compose up -d                      # 本体（初回は、イメージの取得で数分かかります）
+docker compose logs init-accounts         # 最初の管理者（fnladmin）のパスワード。1回だけ表示されます
+```
+
+- パスワードを控えたら、ログを消してください（`docker compose rm -sf init-accounts`）。
+- ノードのイメージ（FRR・スイッチ）は、`init-images` が取得します（`docker compose logs -f init-images`）。
+- ブラウザで `https://<サーバーのアドレス>/` を開きます（証明書は自己署名なので、警告が出ます）。利用者のアカウントは、管理画面（人のアイコン）で作ります。
+- 手元の準備：80 と 443 のポートが空いていること。ホストの nginx などは止めておきます。
+
+**配布用の tar.gz（非推奨）**：`ghcr.io` につながらない環境や、コードを直しながら試す場合のために残しています。
+[Releases](https://github.com/FreeNetworkLab/Free-Networking-labs/releases) の `fnl-<バージョン>.tar.gz` を使います。画面はビルド済みです。
 
 ```sh
 tar xzf fnl-<バージョン>.tar.gz && cd fnl-<バージョン>

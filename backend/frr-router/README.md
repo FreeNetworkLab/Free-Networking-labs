@@ -24,7 +24,7 @@ int eth1.10
 ## ビルド
 
 ```sh
-docker build -t fnl/frr:3 backend/frr-router
+docker build -f backend/frr-router/Dockerfile -t fnl/frr:4 .   # リポジトリのルートで
 ```
 
 ## LLDP/CDP（`fnl/frr:3`、2026-10-14〜）

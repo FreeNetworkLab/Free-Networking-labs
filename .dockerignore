@@ -1,0 +1,10 @@
+# イメージのビルドに要らないもの（コンテキストを小さく、秘密を入れない）
+.git
+.github
+.claude
+dev-tools
+docs
+**/node_modules
+**/certs
+frontend/dist
+backend/compose/.env

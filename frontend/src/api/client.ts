@@ -136,6 +136,58 @@ export function login(username: string, password: string) {
   })
 }
 
+// ---- ユーザー管理（管理者＝clab_admins だけ。一般の利用者は403）。clab-api-server の /api/v1/users ----
+// アカウントはサーバー（コンテナ）の中のLinuxアカウント。利用者は常に clab_api だけ・nologinで作る（2026-11-16）
+export interface ApiUser {
+  username: string
+  uid: string
+  gid: string
+  displayName?: string
+  homeDir: string
+  shell: string
+  groups: string[]
+  isSuperuser?: boolean
+  isApiUser?: boolean
+}
+
+export function listUsers() {
+  return request<ApiUser[]>('/api/v1/users')
+}
+
+export function createUser(username: string, password: string, fullName?: string) {
+  return request<{ message: string }>('/api/v1/users', {
+    method: 'POST',
+    body: JSON.stringify({ username, password, shell: '/usr/sbin/nologin', groups: ['clab_api'], ...(fullName ? { fullName } : {}) }),
+  })
+}
+
+export function changeUserPassword(username: string, newPassword: string) {
+  return request<{ message: string }>(`/api/v1/users/${encodeURIComponent(username)}/password`, {
+    method: 'PUT',
+    body: JSON.stringify({ newPassword }),
+  })
+}
+
+// 自分のパスワードを変える（誰でも。現在のパスワードが要る。他人のは403）
+export function changeOwnPassword(username: string, currentPassword: string, newPassword: string) {
+  return request<{ message: string }>(`/api/v1/users/${encodeURIComponent(username)}/password`, {
+    method: 'PUT',
+    body: JSON.stringify({ currentPassword, newPassword }),
+  })
+}
+
+// 管理者（clab_admins）にする／やめる。上流の PUT /api/v1/users/{u} の isSuperuser（管理者だけが呼べる）
+export function setUserSuperuser(username: string, isSuperuser: boolean) {
+  return request<{ message: string }>(`/api/v1/users/${encodeURIComponent(username)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ isSuperuser }),
+  })
+}
+
+export function deleteUser(username: string) {
+  return request<{ message: string }>(`/api/v1/users/${encodeURIComponent(username)}`, { method: 'DELETE' })
+}
+
 // GET /api/v1/labs の生レスポンス（api-contract.md 2.1、{ [labName]: RawLabNode[] } 形状）
 export interface RawLabNode {
   name: string
